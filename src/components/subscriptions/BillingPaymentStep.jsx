@@ -419,6 +419,13 @@ const BillingPaymentStep = ({ onNext, onPrevious, currentStep, totalSteps }) => 
       showError('Please select a payment method')
       return false
     }
+
+    // Validate that invoice file is uploaded for non-sponsor customers
+    if (uploadedFiles.length === 0) {
+      showError('Please upload an invoice file before completing the subscription')
+      return false
+    }
+
     return true
   }
 
@@ -982,7 +989,7 @@ const BillingPaymentStep = ({ onNext, onPrevious, currentStep, totalSteps }) => 
           {!isSponsor && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Upload Invoice Files
+                Upload Invoice Files <span className="text-red-500">*</span>
               </label>
               <div
                 className="border-2 border-dashed border-blue-300 dark:border-blue-600 rounded-lg p-6 text-center hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
@@ -1004,6 +1011,11 @@ const BillingPaymentStep = ({ onNext, onPrevious, currentStep, totalSteps }) => 
                   />
                 </label>
               </div>
+
+              {/* Required field message */}
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                <span className="text-red-500">*</span> Invoice file is required to complete the subscription
+              </p>
 
               {/* Uploaded Files */}
               {uploadedFiles.length > 0 && (

@@ -10,6 +10,7 @@ import Plans from './pages/Plans'
 import Customers from './pages/Customers'
 import Subscriptions from './pages/Subscriptions'
 import CreateSubscription from './pages/CreateSubscription'
+import ManageSubscriptions from './pages/ManageSubscriptions'
 import Users from './pages/Users'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
@@ -40,6 +41,7 @@ function App() {
               <Route path="customers" element={<Customers />} />
               <Route path="subscriptions" element={<Subscriptions />} />
               <Route path="subscriptions/create" element={<CreateSubscription />} />
+              <Route path="subscriptions/manage" element={<ManageSubscriptions />} />
               <Route path="users" element={<Users />} />
               <Route path="reports" element={<Reports />} />
               <Route path="settings" element={<Settings />} />

@@ -1,6 +1,6 @@
 import React from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { X, LayoutDashboard, Users, FileText, Settings, ChevronRight, ChevronLeft, Calendar, Repeat } from 'lucide-react'
+import { X, LayoutDashboard, Users, FileText, Settings, ChevronRight, ChevronLeft, Calendar, Repeat, Shield } from 'lucide-react'
 
 const Sidebar = ({ isOpen, isCollapsed, onClose, onToggleCollapse }) => {
   const location = useLocation()
@@ -10,6 +10,7 @@ const Sidebar = ({ isOpen, isCollapsed, onClose, onToggleCollapse }) => {
     { name: 'Plans', href: '/plans', icon: Calendar },
     { name: 'Customers', href: '/customers', icon: Users },
     { name: 'Subscriptions', href: '/subscriptions', icon: Repeat },
+    { name: 'Manage Subscriptions', href: '/subscriptions/manage', icon: Shield },
     { name: 'Reports', href: '/reports', icon: FileText },
     { name: 'Settings', href: '/settings', icon: Settings },
   ]

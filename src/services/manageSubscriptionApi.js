@@ -31,8 +31,23 @@ export const searchBySID = async (sid) => {
   }
 }
 
-// Search subscriptions by phone number
+// Search subscriptions by phone number (returns list of subscriptions)
 export const searchByPhone = async (phone) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/ActionsManager/subscription/search-by-phone/${encodeURIComponent(phone)}`)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('Error searching by phone:', error)
+    throw error
+  }
+}
+
+// Legacy search by phone (old endpoint)
+export const searchByPhoneLegacy = async (phone) => {
   try {
     const response = await fetch(`${API_BASE_URL}/Subscriptions/GetSubscriptionsByPhone?PhoneNumber=${encodeURIComponent(phone)}`)
     if (!response.ok) {
@@ -41,7 +56,7 @@ export const searchByPhone = async (phone) => {
     const data = await response.json()
     return data
   } catch (error) {
-    console.error('Error searching by phone:', error)
+    console.error('Error searching by phone (legacy):', error)
     throw error
   }
 }

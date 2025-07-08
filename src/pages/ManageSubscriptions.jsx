@@ -1422,20 +1422,28 @@ const ManageSubscriptions = () => {
     if (selectAll) {
       setSelectedRows([])
     } else {
-      const allFilteredMealIds = filteredData.map(meal => meal.id) || []
+      const allFilteredMealIds = filteredGroupedMeals.map(group => {
+        const firstMeal = Object.values(group.meals)[0]
+        return firstMeal?.dayID || firstMeal?.id
+      }).filter(id => id) || []
       setSelectedRows(allFilteredMealIds)
     }
     setSelectAll(!selectAll)
-  }, [selectAll, filteredData])
+  }, [selectAll, filteredGroupedMeals])
 
   // Update selectAll state when individual rows are selected
   React.useEffect(() => {
-    const totalFilteredRows = filteredData.length || 0
+    const totalFilteredRows = filteredGroupedMeals.length || 0
+    const allFilteredMealIds = filteredGroupedMeals.map(group => {
+      const firstMeal = Object.values(group.meals)[0]
+      return firstMeal?.dayID || firstMeal?.id
+    }).filter(id => id)
+
     const selectedFilteredCount = selectedRows.filter(id =>
-      filteredData.some(meal => meal.id === id)
+      allFilteredMealIds.includes(id)
     ).length
     setSelectAll(selectedFilteredCount > 0 && selectedFilteredCount === totalFilteredRows)
-  }, [selectedRows, filteredData])
+  }, [selectedRows, filteredGroupedMeals])
 
   // Action Handlers
   const handleActionClick = (actionType, actionCategory) => {
@@ -1701,6 +1709,117 @@ const ManageSubscriptions = () => {
         console.log('✅ Unrestrict subscription result:', result)
 
         success(`Successfully unrestricted ${formData.selectedDays.length} day(s) from subscription`)
+
+        // Simulate clicking the search by SID button to refresh data
+        console.log('🔄 Refreshing subscription data by simulating SID search...')
+        await handleSearch(subscriptionId.toString(), 'sid')
+      }
+
+      // Handle Change Start Date action
+      if (selectedAction?.type === 'changeStartDate') {
+        if (!formData.startDate) {
+          showError('Please select a start date')
+          return
+        }
+
+        console.log(`🔄 Changing start date for subscription ${subscriptionId} to: ${formData.startDate}`)
+
+        const requestBody = {
+          startDate: formData.startDate,
+          notes: formData.notes || 'string'
+        }
+
+        console.log('📤 Request body:', requestBody)
+        console.log('📡 API URL:', `/api/v1/ActionsManager/subscription/${subscriptionId}/change-start-date`)
+
+        const response = await makeApiCall(`/api/v1/ActionsManager/subscription/${subscriptionId}/change-start-date`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 Response status:', response.status)
+        console.log('📡 Response headers:', response.headers)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('❌ API Error Response:', errorText)
+          throw new Error(`Failed to change start date: ${response.status} - ${errorText}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ Change start date result:', result)
+
+        success(`Successfully changed subscription start date to: ${formData.startDate}`)
+
+        // Simulate clicking the search by SID button to refresh data
+        console.log('🔄 Refreshing subscription data by simulating SID search...')
+        await handleSearch(subscriptionId.toString(), 'sid')
+      }
+
+      // Handle Merge Days action
+      if (selectedAction?.type === 'mergeUnmerge') {
+        if (selectedRows.length === 0) {
+          showError('Please select at least one day to merge')
+          return
+        }
+
+        console.log(`🔄 Merging days for subscription ${subscriptionId}`)
+        console.log('Selected rows:', selectedRows)
+        console.log('Merge data:', actionData.mergeDays)
+
+        // Prepare the days array with updated delivery dates
+        const mergeDays = actionData.mergeDays || {}
+        const daysToMerge = selectedRows.map(dayId => {
+          const dayData = mergeDays[dayId]
+          const originalDay = subscriptionData?.subscriptionDetails?.find(d => d.id === dayId)
+
+          return {
+            dayId: dayData?.dayId || originalDay?.dayID || dayId,
+            deliveryDate: dayData?.deliveryDate || (originalDay?.date ? new Date(originalDay.date).toISOString().split('T')[0] : ''),
+            dayNumber: dayData?.dayNumber || originalDay?.dayNumber || 1,
+            dayName: dayData?.dayName || (originalDay?.date ? new Date(originalDay.date).toLocaleDateString('en-US', { weekday: 'long' }) : ''),
+            deliveryStatus: dayData?.deliveryStatus || originalDay?.deliveryStatus || originalDay?.status || 'Pending'
+          }
+        })
+
+        const requestBody = {
+          days: daysToMerge,
+          notes: formData.notes || 'string'
+        }
+
+        console.log('📤 Request body:', requestBody)
+        console.log('📡 API URL:', `/api/v1/ActionsManager/subscription/${subscriptionId}/merge-days`)
+
+        const response = await makeApiCall(`/api/v1/ActionsManager/subscription/${subscriptionId}/merge-days`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 Response status:', response.status)
+        console.log('📡 Response headers:', response.headers)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('❌ API Error Response:', errorText)
+          throw new Error(`Failed to merge days: ${response.status} - ${errorText}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ Merge days result:', result)
+
+        success(`Successfully merged ${selectedRows.length} day(s)`)
+
+        // Clear selected rows
+        setSelectedRows([])
+        setSelectAll(false)
 
         // Simulate clicking the search by SID button to refresh data
         console.log('🔄 Refreshing subscription data by simulating SID search...')
@@ -2780,7 +2899,10 @@ const ManageSubscriptions = () => {
                             >
                               Change Day Status
                             </button>
-                            <button className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors">
+                            <button
+                              onClick={() => handleActionClick('mergeUnmerge', 'days')}
+                              className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors"
+                            >
                               Merge Days
                             </button>
                             <button className="px-3 py-1.5 bg-slate-500 text-white rounded-lg text-sm font-medium hover:bg-slate-600 transition-colors">
@@ -2864,14 +2986,14 @@ const ManageSubscriptions = () => {
                                     transition-all duration-200 ease-in-out
                                     ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/50 dark:bg-gray-800/50'}
                                     hover:bg-gray-100/70 dark:hover:bg-gray-700/50
-                                    ${selectedRows.includes(firstMeal?.id) ? 'bg-blue-50/80 dark:bg-blue-900/20 ring-1 ring-blue-200 dark:ring-blue-800' : ''}
+                                    ${selectedRows.includes(firstMeal?.dayID || firstMeal?.id) ? 'bg-blue-50/80 dark:bg-blue-900/20 ring-1 ring-blue-200 dark:ring-blue-800' : ''}
                                   `}
                                 >
                                   <td className="py-3 px-2 w-8">
                                     <input
                                       type="checkbox"
-                                      checked={selectedRows.includes(firstMeal?.id)}
-                                      onChange={() => handleRowSelect(firstMeal?.id)}
+                                      checked={selectedRows.includes(firstMeal?.dayID || firstMeal?.id)}
+                                      onChange={() => handleRowSelect(firstMeal?.dayID || firstMeal?.id)}
                                       className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2 focus:ring-offset-0"
                                     />
                                   </td>
@@ -3373,7 +3495,8 @@ const ManageSubscriptions = () => {
         {showActionDialog && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[70vh] overflow-y-auto ${
-              selectedAction?.type === 'unrestrict' ? 'max-w-lg' : 'max-w-md'
+              selectedAction?.type === 'unrestrict' ? 'max-w-lg' :
+              selectedAction?.type === 'mergeUnmerge' ? 'max-w-4xl' : 'max-w-md'
             }`}>
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -3691,8 +3814,142 @@ const ManageSubscriptions = () => {
                     </div>
                   )}
 
+                  {/* Change Start Date Form */}
+                  {selectedAction?.type === 'changeStartDate' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Start Date
+                        </label>
+                        <input
+                          type="date"
+                          value={actionData.startDate || ''}
+                          onChange={(e) => setActionData({ ...actionData, startDate: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Notes
+                        </label>
+                        <textarea
+                          value={actionData.notes || ''}
+                          onChange={(e) => setActionData({ ...actionData, notes: e.target.value })}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 focus:outline-none dark:bg-gray-700 dark:text-white resize-none"
+                          placeholder="Add notes about changing the start date..."
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Merge Days Form */}
+                  {selectedAction?.type === 'mergeUnmerge' && (
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                          Merge Days
+                        </h3>
+                        <div className="max-h-96 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
+                              <tr>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900 dark:text-white">DeliveryDay</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900 dark:text-white">Day ID</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900 dark:text-white">DayNumber</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900 dark:text-white">DayName</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900 dark:text-white">DeliveryStatus</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                              {(() => {
+                                // Get selected days from subscription details
+                                const selectedDays = subscriptionData?.subscriptionDetails?.filter(detail => {
+                                  const matchFound = selectedRows.includes(detail.dayID) ||
+                                                   selectedRows.includes(detail.id) ||
+                                                   selectedRows.includes(detail.dayId) ||
+                                                   selectedRows.includes(String(detail.dayID)) ||
+                                                   selectedRows.includes(String(detail.id))
+                                  return matchFound
+                                }) || []
+
+                                console.log('🔍 Selected days for merge:', selectedDays)
+
+                                return selectedDays.map((day, index) => (
+                                  <tr key={day.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                    <td className="px-4 py-3">
+                                      <input
+                                        type="date"
+                                        value={(() => {
+                                          // Get the current delivery date for this day
+                                          const mergeData = actionData.mergeDays || {}
+                                          const dayData = mergeData[day.id]
+                                          if (dayData?.deliveryDate) {
+                                            return dayData.deliveryDate
+                                          }
+                                          // Default to original date
+                                          if (day.date) {
+                                            return new Date(day.date).toISOString().split('T')[0]
+                                          }
+                                          return ''
+                                        })()}
+                                        onChange={(e) => {
+                                          const currentMergeData = actionData.mergeDays || {}
+                                          setActionData({
+                                            ...actionData,
+                                            mergeDays: {
+                                              ...currentMergeData,
+                                              [day.id]: {
+                                                ...currentMergeData[day.id],
+                                                deliveryDate: e.target.value,
+                                                dayId: day.dayID || day.id,
+                                                dayNumber: day.dayNumber || index + 1,
+                                                dayName: day.dayName || new Date(day.date).toLocaleDateString('en-US', { weekday: 'long' }),
+                                                deliveryStatus: day.deliveryStatus || day.status
+                                              }
+                                            }
+                                          })
+                                        }}
+                                        className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-purple-500 focus:border-purple-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                                      />
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-900 dark:text-white">
+                                      {day.dayID || day.id}
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-900 dark:text-white">
+                                      {day.dayNumber || index + 1}
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-900 dark:text-white">
+                                      {day.dayName || (day.date ? new Date(day.date).toLocaleDateString('en-US', { weekday: 'long' }) : 'N/A')}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                        {day.deliveryStatus || day.status || 'Pending'}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))
+                              })()}
+                            </tbody>
+                          </table>
+                        </div>
+                        {selectedRows.length === 0 && (
+                          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <p>Please select days from the subscription details table to merge</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Placeholder for other actions */}
-                  {selectedAction?.type !== 'extendDays' && (
+                  {selectedAction?.type !== 'extendDays' &&
+                   selectedAction?.type !== 'activate' &&
+                   selectedAction?.type !== 'hold' &&
+                   selectedAction?.type !== 'restrict' &&
+                   selectedAction?.type !== 'unrestrict' &&
+                   selectedAction?.type !== 'changeStartDate' &&
+                   selectedAction?.type !== 'mergeUnmerge' && (
                     <div className="space-y-4">
                       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
                         <div className="flex items-center gap-3">
@@ -3726,7 +3983,9 @@ const ManageSubscriptions = () => {
                       (selectedAction?.type === 'activate' && !actionData.activeDate) ||
                       (selectedAction?.type === 'hold' && !actionData.holdDate) ||
                       (selectedAction?.type === 'restrict' && (!actionData.fromDate || !actionData.toDate)) ||
-                      (selectedAction?.type === 'unrestrict' && (!actionData.selectedDays || actionData.selectedDays.length === 0))
+                      (selectedAction?.type === 'unrestrict' && (!actionData.selectedDays || actionData.selectedDays.length === 0)) ||
+                      (selectedAction?.type === 'changeStartDate' && !actionData.startDate) ||
+                      (selectedAction?.type === 'mergeUnmerge' && selectedRows.length === 0)
                     }
                     className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2"
                   >

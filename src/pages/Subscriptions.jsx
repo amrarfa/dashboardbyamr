@@ -357,9 +357,14 @@ const Subscriptions = () => {
   }
 
   const handleEditSubscription = (subscription) => {
-    // TODO: Implement edit subscription modal
     const id = subscription.subscriptionsID || subscription.id
-    info(`Editing subscription ${id}`)
+    if (id) {
+      // Navigate to manage subscription page with the subscription ID as a query parameter
+      navigate(`/subscriptions/manage?sid=${id}`)
+      info(`Navigating to manage subscription ${id}`)
+    } else {
+      showError('Subscription ID not found')
+    }
   }
 
   const handleCancelSubscription = (subscription) => {

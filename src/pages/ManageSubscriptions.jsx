@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Search,
   Package,
@@ -36,7 +37,8 @@ import {
   Settings,
   ToggleLeft,
   Trash2,
-  Shuffle
+  Shuffle,
+  RefreshCw
 } from 'lucide-react'
 import { useToast } from '../contexts/ToastContext'
 
@@ -54,6 +56,7 @@ const makeApiCall = async (url, options = {}) => {
   }
 }
 import { getSubscriptionBySID, searchByPhone } from '../services/manageSubscriptionApi'
+import apiService from '../services/api'
 
 // Function to get unique colors for action types
 const getActionTypeColor = (actionType) => {
@@ -182,6 +185,8 @@ const getDislikeMeals = async (subscriptionId) => {
 
 const ManageSubscriptions = () => {
   const { success, error: showError, info } = useToast()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   // Enhanced State Management
   const [searchQuery, setSearchQuery] = useState('')
@@ -197,6 +202,21 @@ const ManageSubscriptions = () => {
   const [selectedRows, setSelectedRows] = useState([])
   const [selectAll, setSelectAll] = useState(false)
   const [statusFilter, setStatusFilter] = useState('all')
+
+  // Column Resize States
+  const [isResizing, setIsResizing] = useState(false)
+  const [resizeColumn, setResizeColumn] = useState(null)
+
+  // Copy functionality
+  const copyToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      success(`Copied to clipboard: ${text}`)
+    } catch (err) {
+      console.error('Failed to copy: ', err)
+      showError('Failed to copy to clipboard')
+    }
+  }
 
   // Action Dialog States
   const [showActionDialog, setShowActionDialog] = useState(false)
@@ -255,6 +275,132 @@ const ManageSubscriptions = () => {
   const [deliveryNotesData, setDeliveryNotesData] = useState(null)
   const [dislikeMealsData, setDislikeMealsData] = useState(null)
   const [tabLoading, setTabLoading] = useState({})
+
+  // Branches data for renew form
+  const [branches, setBranches] = useState([])
+
+  // Renew form data states
+  const [availableMealTypes, setAvailableMealTypes] = useState([])
+  const [availableDurations, setAvailableDurations] = useState([])
+  const [availableDeliveryDays, setAvailableDeliveryDays] = useState([])
+  const [availablePaymentTypes, setAvailablePaymentTypes] = useState([])
+  const [loadingPlanData, setLoadingPlanData] = useState(false)
+  const [loadingRenewData, setLoadingRenewData] = useState(false)
+
+  // Load branches data
+  const loadBranches = async () => {
+    try {
+      const response = await apiService.getAllBranches()
+      const branchesData = response?.data || response || []
+      console.log('🏢 Branches loaded:', branchesData)
+      setBranches(branchesData)
+    } catch (error) {
+      console.error('Error loading branches:', error)
+      setBranches([])
+    }
+  }
+
+  // Load meal types and durations based on plan ID
+  const loadPlanData = async (planId) => {
+    if (!planId) {
+      setAvailableMealTypes([])
+      setAvailableDurations([])
+      return
+    }
+
+    setLoadingPlanData(true)
+    try {
+      console.log('🍽️ Loading plan data for plan ID:', planId)
+
+      const [mealsResponse, durationsResponse] = await Promise.all([
+        apiService.getMealsTypes(planId),
+        apiService.getPlanDays(planId)
+      ])
+
+      // Set meal types
+      const mealTypesData = mealsResponse?.data || mealsResponse || []
+      console.log('🍽️ Raw meal types data:', mealTypesData)
+
+      const transformedMealTypes = mealTypesData.map(mealType => ({
+        id: mealType.mealTypeID,
+        name: mealType.mealTypeName,
+        categoryId: mealType.mealTypeCategoryID,
+        categoryName: mealType.mealTypeCategoryName
+      }))
+
+      console.log('🍽️ Transformed meal types:', transformedMealTypes)
+      setAvailableMealTypes(transformedMealTypes)
+
+      // Set durations
+      const durationsData = durationsResponse?.data || durationsResponse || []
+      console.log('📅 Durations data:', durationsData)
+      setAvailableDurations(durationsData)
+
+    } catch (error) {
+      console.error('Error loading plan data:', error)
+      setAvailableMealTypes([])
+      setAvailableDurations([])
+    } finally {
+      setLoadingPlanData(false)
+    }
+  }
+
+  // Load branches on component mount
+  useEffect(() => {
+    loadBranches()
+  }, [])
+
+  // Load meal types for renew form (step by step)
+  const loadMealTypesForRenew = async () => {
+    if (!subscriptionData?.subscriptionHeader?.planId) {
+      console.log('❌ No plan ID available for loading meal types')
+      setAvailableMealTypes([])
+      return
+    }
+
+    setLoadingRenewData(true)
+    console.log('🔄 Loading meal types for renew form...')
+
+    try {
+      const planId = subscriptionData.subscriptionHeader.planId
+      console.log('📋 Loading meal types for plan ID:', planId)
+
+      // Call the specific endpoint: /CreateSubscriptions/GetMealsTypes?PlanID={planId}
+      const response = await apiService.getMealsTypes(planId)
+      console.log('🍽️ Raw meal types API response:', response)
+
+      // Extract data from response
+      const mealTypesData = response?.data || response || []
+      console.log('🍽️ Extracted meal types data:', mealTypesData)
+
+      // Transform the data according to the API response structure
+      const transformedMealTypes = mealTypesData.map(mealType => ({
+        id: mealType.mealTypeID,
+        name: mealType.mealTypeName,
+        categoryId: mealType.mealTypeCategoryID,
+        categoryName: mealType.mealTypeCategoryName
+      }))
+
+      console.log('🍽️ Transformed meal types:', transformedMealTypes)
+      setAvailableMealTypes(transformedMealTypes)
+
+      console.log('✅ Meal types loaded successfully')
+
+    } catch (error) {
+      console.error('❌ Error loading meal types:', error)
+      setAvailableMealTypes([])
+    } finally {
+      setLoadingRenewData(false)
+    }
+  }
+
+  // Load meal types when renew dialog opens
+  useEffect(() => {
+    if (selectedAction?.type === 'renew' && subscriptionData?.subscriptionHeader?.planId) {
+      console.log('🔄 Renew dialog opened, loading meal types...')
+      loadMealTypesForRenew()
+    }
+  }, [selectedAction, subscriptionData])
 
   // Mock subscription data for demonstration
   const mockSubscriptionData = {
@@ -685,6 +831,8 @@ const ManageSubscriptions = () => {
       },
       subscriptionDetails: details.map(meal => ({
         id: meal.id,
+        dayID: meal.dayID, // Add dayID field
+        dayNumberCount: meal.dayNumberCount, // Add dayNumberCount field
         date: meal.deliveryDate,
         mealType: meal.mealTypeName,
         status: meal.deliveryStatus,
@@ -1445,6 +1593,62 @@ const ManageSubscriptions = () => {
     setSelectAll(selectedFilteredCount > 0 && selectedFilteredCount === totalFilteredRows)
   }, [selectedRows, filteredGroupedMeals])
 
+  // Handle URL parameters on component mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(location.search)
+    const sidFromUrl = urlParams.get('sid')
+    const phoneFromUrl = urlParams.get('phone')
+
+    if (sidFromUrl) {
+      console.log('🔗 Found SID in URL:', sidFromUrl)
+      setSearchQuery(sidFromUrl)
+      setSearchType('sid')
+      // Automatically search for the subscription
+      handleSearch(sidFromUrl, 'sid')
+
+      // Clean up URL parameters after processing
+      navigate('/subscriptions/manage', { replace: true })
+    } else if (phoneFromUrl) {
+      console.log('🔗 Found phone in URL:', phoneFromUrl)
+      setSearchQuery(phoneFromUrl)
+      setSearchType('phone')
+      // Automatically search for the subscription
+      handleSearch(phoneFromUrl, 'phone')
+
+      // Clean up URL parameters after processing
+      navigate('/subscriptions/manage', { replace: true })
+    }
+  }, [location.search, navigate]) // Only run when URL search params change
+
+  // Column Resize Handlers
+  const handleMouseDown = (e, columnIndex) => {
+    e.preventDefault()
+    setIsResizing(true)
+    setResizeColumn(columnIndex)
+
+    const startX = e.clientX
+    const table = e.target.closest('table')
+    const th = table.querySelectorAll('th')[columnIndex]
+    const startWidth = th.offsetWidth
+
+    const handleMouseMove = (e) => {
+      const currentX = e.clientX
+      const diffX = currentX - startX
+      const newWidth = Math.max(50, startWidth + diffX) // Minimum width of 50px
+      th.style.width = `${newWidth}px`
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      setResizeColumn(null)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
+
   // Action Handlers
   const handleActionClick = (actionType, actionCategory) => {
     // Handle refund action specially
@@ -1824,6 +2028,65 @@ const ManageSubscriptions = () => {
         // Simulate clicking the search by SID button to refresh data
         console.log('🔄 Refreshing subscription data by simulating SID search...')
         await handleSearch(subscriptionId.toString(), 'sid')
+      }
+
+      // Handle Renew action
+      if (selectedAction?.type === 'renew') {
+        if (!formData.startDate || !formData.duration) {
+          showError('Please fill in all required fields')
+          return
+        }
+
+        console.log('🔄 Processing renew action with data:', formData)
+
+        // Prepare renew data based on current subscription
+        const renewData = {
+          customerId: subscriptionData?.subscriptionHeader?.customerId,
+          customerPhone: subscriptionData?.subscriptionHeader?.phoneNumber,
+          planId: subscriptionData?.subscriptionHeader?.planId,
+          startDate: formData.startDate,
+          duration: formData.duration,
+          deliveryDays: formData.deliveryDays || subscriptionData?.subscriptionHeader?.deliveryDays || [],
+          mealTypes: formData.mealTypes || subscriptionData?.subscriptionHeader?.mealTypes || [],
+          subscriptionType: formData.subscriptionType !== undefined ? formData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0),
+          branchId: formData.branchId || subscriptionData?.subscriptionHeader?.branchId || null,
+          oldSid: subscriptionId,
+          notes: formData.notes || '',
+          discount: formData.discount || '',
+          manualDiscount: formData.manualDiscount || 0,
+          bagValue: formData.bagValue || 0,
+          withoutInvoice: formData.withoutInvoice || false,
+          uploadedFiles: formData.uploadedFiles || []
+        }
+
+        console.log('📤 Sending renew request:', renewData)
+
+        try {
+          // Call the create subscription API for renewal
+          const response = await fetch('/api/v1/CreateSubscriptions/CreateSubscriptions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(renewData)
+          })
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`)
+          }
+
+          const result = await response.json()
+          console.log('✅ Renew response:', result)
+
+          success('Subscription renewed successfully!')
+
+          // Refresh subscription data
+          console.log('🔄 Refreshing subscription data by simulating SID search...')
+          await handleSearch(subscriptionId.toString(), 'sid')
+        } catch (apiError) {
+          console.error('❌ API Error during renew:', apiError)
+          throw new Error(`Failed to renew subscription: ${apiError.message}`)
+        }
       }
 
       // TODO: Implement other actions here
@@ -2345,9 +2608,20 @@ const ManageSubscriptions = () => {
                   <div className="space-y-3">
                     <div className="flex items-center gap-2">
                       <Phone className="h-4 w-4 text-blue-500 dark:text-blue-400" />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Phone</p>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{subscriptionData?.subscriptionHeader?.phoneNumber || 'N/A'}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{subscriptionData?.subscriptionHeader?.phoneNumber || 'N/A'}</p>
+                          {subscriptionData?.subscriptionHeader?.phoneNumber && subscriptionData.subscriptionHeader.phoneNumber !== 'N/A' && (
+                            <button
+                              onClick={() => copyToClipboard(subscriptionData.subscriptionHeader.phoneNumber)}
+                              className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200"
+                              title="Copy phone number"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -2664,18 +2938,11 @@ const ManageSubscriptions = () => {
                         Extend Days
                       </button>
                       <button
-                        onClick={() => handleActionClick('detact', 'days')}
-                        className="w-full text-left px-3 py-2 text-sm bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
+                        onClick={() => handleActionClick('renew', 'days')}
+                        className="w-full text-left px-3 py-2 text-sm bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
                       >
-                        <Minus className="h-4 w-4" />
-                        Remove Days
-                      </button>
-                      <button
-                        onClick={() => handleActionClick('mergeUnmerge', 'days')}
-                        className="w-full text-left px-3 py-2 text-sm bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
-                      >
-                        <Shuffle className="h-4 w-4" />
-                        Merge/Unmerge Days
+                        <RefreshCw className="h-4 w-4" />
+                        Renew Subscription
                       </button>
                     </div>
                   </div>
@@ -2944,33 +3211,97 @@ const ManageSubscriptions = () => {
                     {/* Table */}
                     {filteredGroupedMeals.length > 0 ? (
                       <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
-                        <table className="w-full">
+                        <table className="w-full" style={{ tableLayout: 'fixed' }}>
                           <thead className="bg-gray-50 dark:bg-gray-800/50">
                             <tr className="border-b border-gray-200 dark:border-gray-700">
-                              <th className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-8">
+                              <th className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-8 relative group">
                                 <input
                                   type="checkbox"
                                   checked={selectAll}
                                   onChange={handleSelectAll}
                                   className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2 focus:ring-offset-0"
                                 />
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 0)}
+                                ></div>
                               </th>
-                              <th className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-8">#</th>
-                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12">Actions</th>
-                              <th className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-20">Delivery Date</th>
-                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-16">Status</th>
+                              <th className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-8 relative group">
+                                #
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 1)}
+                                ></div>
+                              </th>
+                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12 relative group">
+                                Actions
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 2)}
+                                ></div>
+                              </th>
+                              <th className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-20 relative group">
+                                Delivery Date
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 3)}
+                                ></div>
+                              </th>
+                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-10 relative group">
+                                dayID
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 4)}
+                                ></div>
+                              </th>
+                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12 relative group">
+                                Day Count
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 5)}
+                                ></div>
+                              </th>
+                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-32 relative group">
+                                Status
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 6)}
+                                ></div>
+                              </th>
                               {/* Dynamic Meal Type Columns */}
-                              {uniqueMealTypes.map((mealType) => (
-                                <th key={mealType} className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs min-w-[100px] max-w-[120px]">
+                              {uniqueMealTypes.map((mealType, mealTypeIndex) => (
+                                <th key={mealType} className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs min-w-[100px] max-w-[120px] relative group">
                                   <div className="truncate" title={mealType}>
                                     {mealType}
                                   </div>
+                                  <div
+                                    className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onMouseDown={(e) => handleMouseDown(e, 7 + mealTypeIndex)}
+                                  ></div>
                                 </th>
                               ))}
-                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-10">Day #</th>
-                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12">Invoice #</th>
-                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12">Line State</th>
-                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12">Actions</th>
+
+                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12 relative group">
+                                Invoice #
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 7 + uniqueMealTypes.length)}
+                                ></div>
+                              </th>
+                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12 relative group">
+                                Line State
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 8 + uniqueMealTypes.length)}
+                                ></div>
+                              </th>
+                              <th className="text-center py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-12 relative group">
+                                Actions
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onMouseDown={(e) => handleMouseDown(e, 9 + uniqueMealTypes.length)}
+                                ></div>
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -2978,6 +3309,19 @@ const ManageSubscriptions = () => {
                               // Get the first meal for row-level data (date, status, etc.)
                               const firstMeal = Object.values(group.meals)[0]
                               const rowId = `group-${group.date}-${index}`
+
+                              // Get dayID and dayNumberCount from the first meal in this group
+                              const dayID = firstMeal?.dayID || 'N/A'
+                              const dayNumberCount = firstMeal?.dayNumberCount || (index + 1)
+
+                              // Debug: Log the first meal structure to see available fields
+                              if (index === 0) {
+                                console.log('🔍 First meal structure:', firstMeal)
+                                console.log('🔍 Available fields:', Object.keys(firstMeal || {}))
+                                console.log('🔍 dayID field:', firstMeal?.dayID)
+                                console.log('🔍 dayNumberCount field:', firstMeal?.dayNumberCount)
+                                console.log('🔍 id field:', firstMeal?.id)
+                              }
 
                               return (
                                 <tr
@@ -3011,11 +3355,13 @@ const ManageSubscriptions = () => {
                                       </div>
                                     </div>
                                   </td>
+                                  <td className="py-3 px-2 text-center text-xs font-medium text-gray-900 dark:text-gray-100">{dayID}</td>
+                                  <td className="py-3 px-2 text-center text-xs font-medium text-gray-900 dark:text-gray-100">{dayNumberCount}</td>
                                   <td className="py-3 px-2 text-center">
                                     <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border shadow-sm ${
                                       getDeliveryStatusColor(group.deliveryStatus || 'Pending', 'badge')
                                     }`}>
-                                      {(group.deliveryStatus || 'Pending').substring(0, 8)}
+                                      {group.deliveryStatus || 'Pending'}
                                     </span>
                                   </td>
                                   {/* Dynamic Meal Type Columns */}
@@ -3035,7 +3381,7 @@ const ManageSubscriptions = () => {
                                       </td>
                                     )
                                   })}
-                                  <td className="py-3 px-2 text-center text-xs font-medium text-gray-900 dark:text-gray-100">{group.dayNumberCount || (index + 1)}</td>
+
                                   <td className="py-3 px-2 text-center text-xs font-medium text-gray-900 dark:text-gray-100">1906</td>
                                   <td className="py-3 px-2 text-center">
                                     <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border shadow-sm ${
@@ -3496,7 +3842,8 @@ const ManageSubscriptions = () => {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[70vh] overflow-y-auto ${
               selectedAction?.type === 'unrestrict' ? 'max-w-lg' :
-              selectedAction?.type === 'mergeUnmerge' ? 'max-w-4xl' : 'max-w-md'
+              selectedAction?.type === 'mergeUnmerge' ? 'max-w-4xl' :
+              selectedAction?.type === 'renew' ? 'max-w-4xl' : 'max-w-md'
             }`}>
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -3519,6 +3866,7 @@ const ManageSubscriptions = () => {
                       {selectedAction?.type === 'changePhone' && 'Change Phone Number'}
                       {selectedAction?.type === 'changeDayStatus' && 'Change Day Status'}
                       {selectedAction?.type === 'deleteDays' && 'Delete Days'}
+                      {selectedAction?.type === 'renew' && 'Renew Subscription'}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                       {selectedAction?.category === 'status' && 'Modify subscription status'}
@@ -3942,6 +4290,342 @@ const ManageSubscriptions = () => {
                     </div>
                   )}
 
+                  {/* Renew Subscription Form */}
+                  {selectedAction?.type === 'renew' && (
+                    <div className="space-y-6">
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+                        <div className="flex items-center gap-3">
+                          <RefreshCw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                          <div>
+                            <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                              Renewing: {subscriptionData?.subscriptionHeader?.planName || 'Current Plan'}
+                            </p>
+                            <p className="text-xs text-blue-700 dark:text-blue-300">
+                              SID: {subscriptionData?.subscriptionHeader?.subscriptionId}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Start Date */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Start Date *
+                          </label>
+                          <input
+                            type="date"
+                            value={actionData.startDate || ''}
+                            onChange={(e) => setActionData(prev => ({ ...prev, startDate: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+
+                        {/* Duration */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Duration (Days) * {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                          </label>
+                          {loadingRenewData ? (
+                            <div className="flex items-center justify-center py-4">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                            </div>
+                          ) : availableDurations.length > 0 ? (
+                            <select
+                              value={actionData.duration !== undefined ? actionData.duration : (subscriptionData?.subscriptionHeader?.duration || '')}
+                              onChange={(e) => setActionData(prev => ({ ...prev, duration: parseInt(e.target.value) }))}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            >
+                              <option value="">Select duration...</option>
+                              {availableDurations.map((duration) => (
+                                <option key={duration.planDaysID || duration.id} value={duration.planDays || duration.days}>
+                                  {duration.planDays || duration.days} days
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="number"
+                              min="1"
+                              value={actionData.duration || subscriptionData?.subscriptionHeader?.duration || ''}
+                              onChange={(e) => setActionData(prev => ({ ...prev, duration: parseInt(e.target.value) }))}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                              placeholder="Enter duration in days"
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Payment Method */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Payment Method {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                        </label>
+                        {loadingRenewData ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                          </div>
+                        ) : (
+                          <select
+                            value={actionData.paymentMethod !== undefined ? actionData.paymentMethod : (subscriptionData?.subscriptionHeader?.paymentMethod || '')}
+                            onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          >
+                            <option value="">Select payment method...</option>
+                            {availablePaymentTypes.map((paymentType) => (
+                              <option key={paymentType.paymentID || paymentType.id} value={paymentType.paymentID || paymentType.id}>
+                                {paymentType.paymentName || paymentType.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      {/* Subscription From */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Subscription From
+                        </label>
+                        <select
+                          value={actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)}
+                          onChange={(e) => setActionData(prev => ({ ...prev, subscriptionType: parseInt(e.target.value) }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        >
+                          <option value={0}>Web</option>
+                          <option value={1}>Mobile Application</option>
+                          <option value={2}>Branch</option>
+                        </select>
+                      </div>
+
+                      {/* Branch - Only show when Branch is selected */}
+                      {(actionData.subscriptionType === 2 || (actionData.subscriptionType === undefined && subscriptionData?.subscriptionHeader?.subscriptionType === 2)) && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Branch
+                          </label>
+                          <select
+                            value={actionData.branchId !== undefined ? actionData.branchId : (subscriptionData?.subscriptionHeader?.branchId || '')}
+                            onChange={(e) => setActionData(prev => ({
+                              ...prev,
+                              branchId: parseInt(e.target.value) || null,
+                              branchName: branches.find(b => b.branchID === parseInt(e.target.value))?.branchName || ''
+                            }))}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          >
+                            <option value="">Choose a branch...</option>
+                            {branches.map((branch) => (
+                              <option key={branch.branchID} value={branch.branchID}>
+                                {branch.branchName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Delivery Days */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Delivery Days {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                        </label>
+                        {loadingRenewData ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            {availableDeliveryDays.length > 0 ? availableDeliveryDays.map(deliveryDay => {
+                              // Get current subscription delivery days (IDs) or use actionData if modified
+                              const currentSubscriptionDayIds = subscriptionData?.subscriptionHeader?.deliveryDays || []
+                              const selectedDayIds = actionData.deliveryDays || currentSubscriptionDayIds
+                              const isChecked = selectedDayIds.includes(deliveryDay.day_id || deliveryDay.id)
+
+                              return (
+                                <label key={deliveryDay.day_id || deliveryDay.id} className="flex items-center space-x-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      const dayId = deliveryDay.day_id || deliveryDay.id
+                                      if (e.target.checked) {
+                                        setActionData(prev => ({
+                                          ...prev,
+                                          deliveryDays: [...(prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId), dayId]
+                                        }))
+                                      } else {
+                                        setActionData(prev => ({
+                                          ...prev,
+                                          deliveryDays: (prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId)
+                                        }))
+                                      }
+                                    }}
+                                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="text-sm text-gray-700 dark:text-gray-300">{deliveryDay.day_name || deliveryDay.name}</span>
+                                </label>
+                              )
+                            }) : (
+                              <div className="col-span-full text-center text-gray-500 dark:text-gray-400 py-4">
+                                No delivery days available
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Meal Types */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Meal Types {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                        </label>
+                        {loadingRenewData ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                            {availableMealTypes.length > 0 ? availableMealTypes.map(mealType => {
+                              // Get current subscription meal types (IDs) or use actionData if modified
+                              const currentSubscriptionMealIds = subscriptionData?.subscriptionHeader?.mealTypes || []
+                              const selectedMealIds = actionData.mealTypes || currentSubscriptionMealIds
+                              const isChecked = selectedMealIds.includes(mealType.id)
+
+                              return (
+                                <label key={mealType.id} className="flex items-center space-x-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setActionData(prev => ({
+                                          ...prev,
+                                          mealTypes: [...(prev.mealTypes || currentSubscriptionMealIds).filter(id => id !== mealType.id), mealType.id]
+                                        }))
+                                      } else {
+                                        setActionData(prev => ({
+                                          ...prev,
+                                          mealTypes: (prev.mealTypes || currentSubscriptionMealIds).filter(id => id !== mealType.id)
+                                        }))
+                                      }
+                                    }}
+                                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="text-sm text-gray-700 dark:text-gray-300">{mealType.name}</span>
+                                </label>
+                              )
+                            }) : (
+                              <div className="col-span-full text-center text-gray-500 dark:text-gray-400 py-4">
+                                No meal types available for this plan
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Pricing Section */}
+                      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 space-y-4">
+                        <h4 className="font-medium text-gray-900 dark:text-white">Pricing & Discounts</h4>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Total
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={actionData.total || subscriptionData?.subscriptionHeader?.totalPrice || 3885}
+                              onChange={(e) => setActionData(prev => ({ ...prev, total: parseFloat(e.target.value) }))}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Manual Discount
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={actionData.manualDiscount || 0}
+                              onChange={(e) => setActionData(prev => ({ ...prev, manualDiscount: parseFloat(e.target.value) }))}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Bag Value
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={actionData.bagValue || 0}
+                              onChange={(e) => setActionData(prev => ({ ...prev, bagValue: parseFloat(e.target.value) }))}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Without Invoice Checkbox */}
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="withoutInvoice"
+                            checked={actionData.withoutInvoice || false}
+                            onChange={(e) => setActionData(prev => ({ ...prev, withoutInvoice: e.target.checked }))}
+                            className="rounded border-gray-300 dark:border-gray-600 text-green-600 focus:ring-green-500"
+                          />
+                          <label htmlFor="withoutInvoice" className="text-sm text-gray-700 dark:text-gray-300">
+                            With Out Invoice
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Notes */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Notes
+                        </label>
+                        <textarea
+                          value={actionData.notes || ''}
+                          onChange={(e) => setActionData(prev => ({ ...prev, notes: e.target.value }))}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          placeholder="Enter any additional notes..."
+                        />
+                      </div>
+
+                      {/* File Upload */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Attach Files
+                        </label>
+                        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                          <input
+                            type="file"
+                            multiple
+                            onChange={(e) => setActionData(prev => ({ ...prev, uploadedFiles: Array.from(e.target.files) }))}
+                            className="hidden"
+                            id="renewFileUpload"
+                          />
+                          <label htmlFor="renewFileUpload" className="cursor-pointer">
+                            <div className="text-gray-500 dark:text-gray-400">
+                              <p className="text-sm">Click To Add Attach</p>
+                              <p className="text-xs mt-1">Upload invoice or related documents</p>
+                            </div>
+                          </label>
+                          {actionData.uploadedFiles && actionData.uploadedFiles.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-sm text-green-600 dark:text-green-400">
+                                {actionData.uploadedFiles.length} file(s) selected
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Placeholder for other actions */}
                   {selectedAction?.type !== 'extendDays' &&
                    selectedAction?.type !== 'activate' &&
@@ -3949,7 +4633,8 @@ const ManageSubscriptions = () => {
                    selectedAction?.type !== 'restrict' &&
                    selectedAction?.type !== 'unrestrict' &&
                    selectedAction?.type !== 'changeStartDate' &&
-                   selectedAction?.type !== 'mergeUnmerge' && (
+                   selectedAction?.type !== 'mergeUnmerge' &&
+                   selectedAction?.type !== 'renew' && (
                     <div className="space-y-4">
                       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
                         <div className="flex items-center gap-3">
@@ -3985,7 +4670,8 @@ const ManageSubscriptions = () => {
                       (selectedAction?.type === 'restrict' && (!actionData.fromDate || !actionData.toDate)) ||
                       (selectedAction?.type === 'unrestrict' && (!actionData.selectedDays || actionData.selectedDays.length === 0)) ||
                       (selectedAction?.type === 'changeStartDate' && !actionData.startDate) ||
-                      (selectedAction?.type === 'mergeUnmerge' && selectedRows.length === 0)
+                      (selectedAction?.type === 'mergeUnmerge' && selectedRows.length === 0) ||
+                      (selectedAction?.type === 'renew' && (!actionData.startDate || !actionData.duration))
                     }
                     className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2"
                   >

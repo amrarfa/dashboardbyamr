@@ -1,5 +1,5 @@
 // API service for managing subscriptions
-const API_BASE_URL = 'http://eg.localhost:7167/api/v1'
+const API_BASE_URL = '/api/v1'
 
 // Get subscription by SID using ActionsManager endpoint
 export const getSubscriptionBySID = async (sid) => {
@@ -12,6 +12,9 @@ export const getSubscriptionBySID = async (sid) => {
     return data
   } catch (error) {
     console.error('Error fetching subscription by SID:', error)
+    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+      throw new Error('CORS Error: Unable to connect to API. Please ensure the backend server is running and CORS is configured properly.')
+    }
     throw error
   }
 }
@@ -42,6 +45,9 @@ export const searchByPhone = async (phone) => {
     return data
   } catch (error) {
     console.error('Error searching by phone:', error)
+    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+      throw new Error('CORS Error: Unable to connect to API. Please ensure the backend server is running and CORS is configured properly.')
+    }
     throw error
   }
 }

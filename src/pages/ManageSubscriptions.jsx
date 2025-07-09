@@ -223,10 +223,147 @@ const ManageSubscriptions = () => {
   const [selectedAction, setSelectedAction] = useState(null)
   const [actionData, setActionData] = useState({})
   const [actionLoading, setActionLoading] = useState(false)
+  const [loadingPlanPrice, setLoadingPlanPrice] = useState(false)
+  const [planPriceData, setPlanPriceData] = useState({})
 
   // Delete Confirmation Dialog States
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmData, setDeleteConfirmData] = useState(null)
+
+  // Get Plan Price API Call
+  const getPlanPrice = async (customerId, planId, duration, mealTypes, deliveryDays) => {
+    // Validation: Check if all 3 required parameters have values
+    if (!customerId || !planId || !duration) {
+      console.log('⚠️ GetPlanPrice: Missing required parameters', { customerId, planId, duration })
+      return
+    }
+
+    // Additional validation for arrays
+    if (!mealTypes || mealTypes.length === 0) {
+      console.log('⚠️ GetPlanPrice: No meal types selected')
+      return
+    }
+
+    if (!deliveryDays || deliveryDays.length === 0) {
+      console.log('⚠️ GetPlanPrice: No delivery days selected')
+      return
+    }
+
+    try {
+      setLoadingPlanPrice(true)
+      console.log('🔄 Calling GetPlanPrice API...', { customerId, planId, duration, mealTypes, deliveryDays })
+
+      // Convert selected meal type IDs to full meal type objects
+      const mealTypesArray = mealTypes.map(mealTypeId => {
+        const mealType = availableMealTypes.find(mt => mt.id === parseInt(mealTypeId))
+        if (mealType) {
+          return {
+            mealTypeCategoryID: mealType.categoryId,
+            mealTypeCategoryName: mealType.categoryName,
+            mealTypeID: mealType.id,
+            mealTypeName: mealType.name
+          }
+        } else {
+          // Fallback if meal type not found in available list
+          return {
+            mealTypeCategoryID: 0,
+            mealTypeCategoryName: "Unknown Category",
+            mealTypeID: parseInt(mealTypeId),
+            mealTypeName: `MealType ${mealTypeId}`
+          }
+        }
+      })
+
+      const requestBody = {
+        customerId: parseInt(customerId),
+        planId: parseInt(planId),
+        duration: parseInt(duration),
+        mealsType: mealTypesArray, // Note: API expects "mealsType" not "mealTypes"
+        isContainBag: false,
+        giftCode: actionData.giftCode || ""
+      }
+
+      console.log('📤 Request Body:', JSON.stringify(requestBody, null, 2))
+
+      const response = await makeApiCall(`http://eg.localhost:7167/api/v1/WebIntegration/GetPlanPrice`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        console.log('✅ GetPlanPrice API Response:', result)
+
+        // Store the full plan price data
+        setPlanPriceData(result)
+
+        // Update action data with pricing information
+        setActionData(prev => ({
+          ...prev,
+          total: result.totalAmount || result.total || prev.total,
+          manualDiscount: result.discountValue || prev.manualDiscount,
+          bagValue: result.bageValue || prev.bagValue
+        }))
+
+        success('Plan price updated successfully')
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        console.error('❌ GetPlanPrice API Error:', response.status, errorData)
+        showError(`Failed to get plan price: ${errorData.message || 'Unknown error'}`)
+      }
+    } catch (error) {
+      console.error('❌ GetPlanPrice Error:', error)
+      showError('Failed to get plan price')
+    } finally {
+      setLoadingPlanPrice(false)
+    }
+  }
+
+  // Auto-calculate total when pricing components change
+  useEffect(() => {
+    const planAmount = planPriceData.planAmount || 0
+    const taxAmount = planPriceData.taxAmount || 0
+    const deliveryFees = planPriceData.deliveryFees || 0
+    const bagValue = actionData.bagValue || 0
+    const manualDiscount = actionData.manualDiscount || 0
+    const calculatedTotal = planAmount + taxAmount + deliveryFees + bagValue - manualDiscount
+
+    // Only update if the calculated total is different from current total
+    if (calculatedTotal !== (actionData.total || 0) && (planAmount > 0 || taxAmount > 0 || deliveryFees > 0)) {
+      setActionData(prev => ({ ...prev, total: calculatedTotal }))
+    }
+  }, [planPriceData.planAmount, planPriceData.taxAmount, planPriceData.deliveryFees, actionData.bagValue, actionData.manualDiscount])
+
+  // Helper function to trigger plan price calculation
+  const triggerPlanPriceUpdate = (newActionData) => {
+    console.log('🔄 triggerPlanPriceUpdate called with:', newActionData)
+
+    // Get required parameters - try different field names for planId
+    const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+    const planId = subscriptionData?.subscriptionHeader?.planId ||
+                   subscriptionData?.subscriptionHeader?.planID ||
+                   subscriptionData?.subscriptionHeader?.plan_id ||
+                   subscriptionData?.subscriptionHeader?.id
+    const duration = newActionData.duration || subscriptionData?.subscriptionHeader?.duration
+    const mealTypes = newActionData.mealTypes || subscriptionData?.subscriptionHeader?.mealTypes || []
+    const deliveryDays = newActionData.deliveryDays || subscriptionData?.subscriptionHeader?.deliveryDays || []
+
+    console.log('📊 Parameters for API call:', {
+      customerId,
+      planId,
+      duration,
+      mealTypes,
+      deliveryDays,
+      subscriptionHeader: subscriptionData?.subscriptionHeader,
+      availableFields: Object.keys(subscriptionData?.subscriptionHeader || {})
+    })
+
+    // Call API with validation
+    getPlanPrice(customerId, planId, duration, mealTypes, deliveryDays)
+  }
 
   // Change Status Dialog States
   const [showChangeStatusDialog, setShowChangeStatusDialog] = useState(false)
@@ -352,28 +489,80 @@ const ManageSubscriptions = () => {
 
   // Load meal types for renew form (step by step)
   const loadMealTypesForRenew = async () => {
-    if (!subscriptionData?.subscriptionHeader?.planId) {
-      console.log('❌ No plan ID available for loading meal types')
+    console.log('🚀 loadMealTypesForRenew function called!')
+    console.log('🔍 Subscription data:', subscriptionData)
+    console.log('🔍 Subscription header:', subscriptionData?.subscriptionHeader)
+
+    // Debug: Log ALL fields in subscriptionHeader to see what's available
+    if (subscriptionData?.subscriptionHeader) {
+      console.log('🔍 ALL subscriptionHeader fields:')
+      Object.entries(subscriptionData.subscriptionHeader).forEach(([key, value]) => {
+        console.log(`  ${key}:`, value, `(type: ${typeof value})`)
+      })
+    }
+
+    // Check different possible field names for plan ID (prioritize numeric planID)
+    const planId = subscriptionData?.subscriptionHeader?.planID ||
+                   subscriptionData?.subscriptionHeader?.planId ||
+                   subscriptionData?.subscriptionHeader?.plan_id ||
+                   subscriptionData?.subscriptionHeader?.PlanId ||
+                   subscriptionData?.subscriptionHeader?.PlanID
+
+    // Also check for plan name as fallback (only if no numeric planID found)
+    const planName = subscriptionData?.subscriptionHeader?.planName
+
+    console.log('🔍 Plan ID (numeric):', planId)
+    console.log('🔍 Plan Name (fallback):', planName)
+    console.log('🔍 Available fields in subscriptionHeader:', Object.keys(subscriptionData?.subscriptionHeader || {}))
+
+    // Log each field and its value to find the plan ID
+    const header = subscriptionData?.subscriptionHeader || {}
+    Object.keys(header).forEach(key => {
+      if (key.toLowerCase().includes('plan')) {
+        console.log(`🎯 PLAN-related field "${key}":`, header[key])
+      }
+    })
+
+    if (!planId && !planName) {
+      console.log('❌ No plan ID or plan name found, cannot load meal types')
       setAvailableMealTypes([])
       return
     }
+
+    // IMPORTANT: Prioritize numeric planID over planName for API calls
+    const planIdentifier = planId || planName
+    console.log('✅ Using plan identifier:', planIdentifier, '(type:', typeof planIdentifier, ')')
 
     setLoadingRenewData(true)
     console.log('🔄 Loading meal types for renew form...')
 
     try {
-      const planId = subscriptionData.subscriptionHeader.planId
-      console.log('📋 Loading meal types for plan ID:', planId)
+      console.log('📋 Loading meal types and delivery days for plan identifier:', planIdentifier)
+      console.log('📋 About to call apiService methods...')
 
-      // Call the specific endpoint: /CreateSubscriptions/GetMealsTypes?PlanID={planId}
-      const response = await apiService.getMealsTypes(planId)
-      console.log('🍽️ Raw meal types API response:', response)
+      // Make parallel API calls for meal types, delivery days, and plan days (duration)
+      console.log('🔄 Making parallel API calls...')
+      const [mealTypesResponse, deliveryDaysResponse, planDaysResponse] = await Promise.all([
+        apiService.getMealsTypes(planIdentifier),
+        apiService.getDeliveryDays(),
+        apiService.getPlanDays(planIdentifier)
+      ])
 
-      // Extract data from response
-      const mealTypesData = response?.data || response || []
+      console.log('✅ All three API calls completed!')
+      console.log('🍽️ Raw meal types API response:', mealTypesResponse)
+      console.log('📅 Raw delivery days API response:', deliveryDaysResponse)
+      console.log('⏱️ Raw plan days API response:', planDaysResponse)
+
+      // Extract data from responses
+      const mealTypesData = mealTypesResponse?.data || mealTypesResponse || []
+      const deliveryDaysData = deliveryDaysResponse?.data || deliveryDaysResponse || []
+      const planDaysData = planDaysResponse?.data || planDaysResponse || []
+
       console.log('🍽️ Extracted meal types data:', mealTypesData)
+      console.log('📅 Extracted delivery days data:', deliveryDaysData)
+      console.log('⏱️ Extracted plan days data:', planDaysData)
 
-      // Transform the data according to the API response structure
+      // Transform meal types data
       const transformedMealTypes = mealTypesData.map(mealType => ({
         id: mealType.mealTypeID,
         name: mealType.mealTypeName,
@@ -381,24 +570,90 @@ const ManageSubscriptions = () => {
         categoryName: mealType.mealTypeCategoryName
       }))
 
-      console.log('🍽️ Transformed meal types:', transformedMealTypes)
-      setAvailableMealTypes(transformedMealTypes)
+      // Transform delivery days data
+      const transformedDeliveryDays = deliveryDaysData.map(day => ({
+        id: day.day_id,
+        name: day.day_name,
+        day_id: day.day_id,
+        day_name: day.day_name,
+        show: day.show
+      }))
 
-      console.log('✅ Meal types loaded successfully')
+      // Transform plan days data (duration options)
+      const transformedDurations = planDaysData.map(duration => ({
+        value: duration.dayCount,
+        label: `${duration.dayCount} days`,
+        dayCount: duration.dayCount
+      }))
+
+      console.log('🍽️ Transformed meal types:', transformedMealTypes)
+      console.log('📅 Transformed delivery days:', transformedDeliveryDays)
+      console.log('⏱️ Transformed durations:', transformedDurations)
+
+      // Set all three states
+      setAvailableMealTypes(transformedMealTypes)
+      setAvailableDeliveryDays(transformedDeliveryDays)
+      setAvailableDurations(transformedDurations)
+
+      console.log('✅ Meal types, delivery days, and durations loaded successfully')
 
     } catch (error) {
       console.error('❌ Error loading meal types:', error)
+      console.error('❌ Error details:', error.message)
+      console.error('❌ Error stack:', error.stack)
       setAvailableMealTypes([])
     } finally {
+      console.log('🏁 Finally block - setting loading to false')
       setLoadingRenewData(false)
     }
   }
 
   // Load meal types when renew dialog opens
   useEffect(() => {
-    if (selectedAction?.type === 'renew' && subscriptionData?.subscriptionHeader?.planId) {
-      console.log('🔄 Renew dialog opened, loading meal types...')
-      loadMealTypesForRenew()
+    console.log('🔍 useEffect triggered - selectedAction:', selectedAction)
+    console.log('🔍 useEffect triggered - subscriptionData:', subscriptionData)
+    console.log('🔍 useEffect triggered - subscriptionHeader:', subscriptionData?.subscriptionHeader)
+    console.log('🔍 useEffect triggered - planID:', subscriptionData?.subscriptionHeader?.planID)
+
+    // Check all possible plan ID field names
+    const possiblePlanIds = {
+      planID: subscriptionData?.subscriptionHeader?.planID,
+      planId: subscriptionData?.subscriptionHeader?.planId,
+      plan_id: subscriptionData?.subscriptionHeader?.plan_id,
+      PlanID: subscriptionData?.subscriptionHeader?.PlanID,
+      PlanId: subscriptionData?.subscriptionHeader?.PlanId
+    }
+    console.log('🔍 All possible plan ID fields:', possiblePlanIds)
+
+    if (selectedAction?.type === 'renew') {
+      console.log('✅ Renew action detected!')
+
+      const planId = subscriptionData?.subscriptionHeader?.planID ||
+                     subscriptionData?.subscriptionHeader?.planId ||
+                     subscriptionData?.subscriptionHeader?.plan_id ||
+                     subscriptionData?.subscriptionHeader?.PlanID ||
+                     subscriptionData?.subscriptionHeader?.PlanId
+
+      const planName = subscriptionData?.subscriptionHeader?.planName
+      // IMPORTANT: Prioritize numeric planID over planName for API calls
+      const planIdentifier = planId || planName
+
+      if (planIdentifier) {
+        console.log('✅ Plan identifier found:', planIdentifier, '(type:', typeof planIdentifier, ') loading meal types...')
+        loadMealTypesForRenew()
+      } else {
+        console.log('❌ No plan ID found in subscription data')
+        console.log('🔍 Full subscription data:', subscriptionData)
+        console.log('🔍 Subscription header keys:', Object.keys(subscriptionData?.subscriptionHeader || {}))
+
+        // Log each field and its value to find the plan ID
+        const header = subscriptionData?.subscriptionHeader || {}
+        Object.keys(header).forEach(key => {
+          console.log(`🔍 Field "${key}":`, header[key])
+        })
+      }
+    } else {
+      console.log('❌ Not a renew action, selectedAction type:', selectedAction?.type)
     }
   }, [selectedAction, subscriptionData])
 
@@ -712,6 +967,12 @@ const ManageSubscriptions = () => {
     const header = subscription.subscriptionHeader || subscription
     const details = subscription.subscriptionDetails || []
 
+    // DEBUG: Log the raw header to see if planID exists
+    console.log('🔍 RAW PHONE SEARCH HEADER:', header)
+    console.log('🔍 RAW phone header.planID:', header.planID)
+    console.log('🔍 RAW phone header.planId:', header.planId)
+    console.log('🔍 RAW phone header.planName:', header.planName)
+
     return {
       subscriptionHeader: {
         // Customer Info - using real API fields
@@ -729,6 +990,7 @@ const ManageSubscriptions = () => {
         // Subscription Info - using real API fields
         subscriptionId: header.subscriptionId || header.subscription_id || header.sid || header.id || 'N/A',
         planName: header.planName || header.plan_name || header.plan || 'N/A',
+        planID: header.planID || header.planId || header.plan_id || null, // Add the missing planID field
         planType: header.planType || header.plan_type || header.type || 'N/A',
         deliveryDays: header.deliveryDays || header.delivery_days || [],
         deliveryTime: header.deliveryTime || header.delivery_time || 'N/A',
@@ -776,6 +1038,12 @@ const ManageSubscriptions = () => {
     const header = apiResponse.data.subscriptionHeader
     const details = apiResponse.data.subscriptionDetails || []
 
+    // DEBUG: Log the raw header to see if planID exists
+    console.log('🔍 RAW API HEADER in transformApiData:', header)
+    console.log('🔍 RAW header.planID:', header.planID)
+    console.log('🔍 RAW header.planId:', header.planId)
+    console.log('🔍 RAW header.planName:', header.planName)
+
     // Parse delivery days from string
     const deliveryDays = header.deliveryDays ? header.deliveryDays.split('|') : []
 
@@ -800,6 +1068,7 @@ const ManageSubscriptions = () => {
         // Subscription Info
         subscriptionId: header.subscriptionID || header.subscriptionsID || 'N/A',
         planName: header.planName || header.plan || 'N/A',
+        planID: header.planID || header.planId || null, // Add the missing planID field
         planType: 'N/A', // Not directly provided
         deliveryDays: deliveryDays,
         deliveryTime: 'N/A', // Not provided in API
@@ -3840,10 +4109,10 @@ const ManageSubscriptions = () => {
         {/* Action Dialog */}
         {showActionDialog && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[70vh] overflow-y-auto ${
+            <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[85vh] overflow-y-auto ${
               selectedAction?.type === 'unrestrict' ? 'max-w-lg' :
-              selectedAction?.type === 'mergeUnmerge' ? 'max-w-4xl' :
-              selectedAction?.type === 'renew' ? 'max-w-4xl' : 'max-w-md'
+              selectedAction?.type === 'mergeUnmerge' ? 'max-w-6xl' :
+              selectedAction?.type === 'renew' ? 'max-w-6xl' : 'max-w-md'
             }`}>
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -3875,6 +4144,7 @@ const ManageSubscriptions = () => {
                       {selectedAction?.category === 'delivery' && 'Adjust delivery settings'}
                       {selectedAction?.category === 'customer' && 'Update customer information'}
                       {selectedAction?.category === 'global' && 'Global subscription changes'}
+                      {selectedAction?.type === 'renew' && `Plan: ${subscriptionData?.subscriptionHeader?.planName || 'Current Plan'} • SID: ${subscriptionData?.subscriptionHeader?.subscriptionId}`}
                     </p>
                   </div>
                   <button
@@ -4293,237 +4563,461 @@ const ManageSubscriptions = () => {
                   {/* Renew Subscription Form */}
                   {selectedAction?.type === 'renew' && (
                     <div className="space-y-6">
-                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
-                        <div className="flex items-center gap-3">
-                          <RefreshCw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                          <div>
-                            <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                              Renewing: {subscriptionData?.subscriptionHeader?.planName || 'Current Plan'}
-                            </p>
-                            <p className="text-xs text-blue-700 dark:text-blue-300">
-                              SID: {subscriptionData?.subscriptionHeader?.subscriptionId}
-                            </p>
+                      {console.log('🎯 Renew form is rendering!', { selectedAction, actionData })}
+
+
+                      {/* Schedule & Duration Section */}
+                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                              <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3a2 2 0 012-2h4a2 2 0 012 2v4m-6 0V6a2 2 0 012-2h4a2 2 0 012 2v1m-6 0h8m-8 0H6a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-2" />
+                              </svg>
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Schedule & Duration</h3>
+                          </div>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Set start date and subscription duration</p>
+                        </div>
+
+
+                        <div className="p-6">
+                          <div className="space-y-4">
+                            {/* Labels Row */}
+                            <div className="grid grid-cols-2 gap-6">
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Start Date *
+                              </label>
+                              <div className="flex items-center justify-between">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Duration * {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                                </label>
+                                {!loadingRenewData && (
+                                  <div className="flex rounded-lg bg-gray-700 p-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setActionData(prev => ({ ...prev, durationMode: 'plan' }))}
+                                      className={`px-4 py-1 text-sm font-medium rounded-md transition-all ${
+                                        (actionData.durationMode || 'plan') === 'plan'
+                                          ? 'bg-blue-600 text-white shadow-sm'
+                                          : 'text-gray-300 hover:text-white'
+                                      }`}
+                                    >
+                                      From Plan
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setActionData(prev => ({ ...prev, durationMode: 'custom', duration: '' }))}
+                                      className={`px-4 py-1 text-sm font-medium rounded-md transition-all ${
+                                        actionData.durationMode === 'custom'
+                                          ? 'bg-blue-600 text-white shadow-sm'
+                                          : 'text-gray-300 hover:text-white'
+                                      }`}
+                                    >
+                                      Custom
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Inputs Row */}
+                            {loadingRenewData ? (
+                              <div className="flex items-center justify-center py-8">
+                                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-6">
+                                {/* Start Date Input */}
+                                <div>
+                                  <input
+                                    type="date"
+                                    value={actionData.startDate || ''}
+                                    onChange={(e) => setActionData(prev => ({ ...prev, startDate: e.target.value }))}
+                                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                                    placeholder="dd/mm/yyyy"
+                                  />
+                                </div>
+
+                                {/* Duration Input */}
+                                <div className="space-y-3">
+                                  <div className="relative">
+                                    {(actionData.durationMode || 'plan') === 'plan' ? (
+                                      <select
+                                        value={actionData.duration || subscriptionData?.subscriptionHeader?.duration || ''}
+                                        onChange={(e) => {
+                                          console.log('🔄 Duration dropdown changed:', e.target.value)
+                                          const newDuration = parseInt(e.target.value)
+                                          const newActionData = { ...actionData, duration: newDuration }
+                                          setActionData(prev => ({ ...prev, duration: newDuration }))
+                                          triggerPlanPriceUpdate(newActionData)
+                                        }}
+                                        className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white appearance-none"
+                                      >
+                                        <option value="">Choose duration...</option>
+                                        {availableDurations.map((duration) => (
+                                          <option key={duration.value} value={duration.value}>
+                                            {duration.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        value={actionData.duration || ''}
+                                        onChange={(e) => {
+                                          const newDuration = parseInt(e.target.value) || ''
+                                          const newActionData = { ...actionData, duration: newDuration }
+                                          setActionData(prev => ({ ...prev, duration: newDuration }))
+                                          if (newDuration) triggerPlanPriceUpdate(newActionData)
+                                        }}
+                                        className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                                        placeholder="Enter custom duration in days"
+                                      />
+                                    )}
+                                    <svg className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                  </div>
+
+                                  {/* Plan Options Indicator */}
+                                  {(actionData.durationMode || 'plan') === 'plan' && availableDurations.length > 0 && (
+                                    <p className="text-xs text-blue-400 font-medium">
+                                      {availableDurations.length} options available from plan
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Start Date */}
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Start Date *
-                          </label>
-                          <input
-                            type="date"
-                            value={actionData.startDate || ''}
-                            onChange={(e) => setActionData(prev => ({ ...prev, startDate: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                          />
+                      {/* Meal Types Section */}
+                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                              <svg className="w-4 h-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                              </svg>
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Meal Types</h3>
+                          </div>
                         </div>
 
-                        {/* Duration */}
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Duration (Days) * {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
-                          </label>
+                        <div className="p-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Select Meal Types {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                            </label>
+                            {!loadingRenewData && availableMealTypes.length > 0 && (
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const allMealTypeIds = availableMealTypes.map(mealType => mealType.id)
+                                    const newActionData = { ...actionData, mealTypes: allMealTypeIds }
+                                    setActionData(prev => ({ ...prev, mealTypes: allMealTypeIds }))
+                                    triggerPlanPriceUpdate(newActionData)
+                                  }}
+                                  className="text-xs px-3 py-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-md transition-colors font-medium"
+                                >
+                                  Select All
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newActionData = { ...actionData, mealTypes: [] }
+                                    setActionData(prev => ({ ...prev, mealTypes: [] }))
+                                    triggerPlanPriceUpdate(newActionData)
+                                  }}
+                                  className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-md transition-colors font-medium"
+                                >
+                                  Unselect All
+                                </button>
+                              </div>
+                            )}
+                          </div>
                           {loadingRenewData ? (
-                            <div className="flex items-center justify-center py-4">
+                            <div className="flex items-center justify-center py-8">
                               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                             </div>
-                          ) : availableDurations.length > 0 ? (
-                            <select
-                              value={actionData.duration !== undefined ? actionData.duration : (subscriptionData?.subscriptionHeader?.duration || '')}
-                              onChange={(e) => setActionData(prev => ({ ...prev, duration: parseInt(e.target.value) }))}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                            >
-                              <option value="">Select duration...</option>
-                              {availableDurations.map((duration) => (
-                                <option key={duration.planDaysID || duration.id} value={duration.planDays || duration.days}>
-                                  {duration.planDays || duration.days} days
-                                </option>
-                              ))}
-                            </select>
                           ) : (
-                            <input
-                              type="number"
-                              min="1"
-                              value={actionData.duration || subscriptionData?.subscriptionHeader?.duration || ''}
-                              onChange={(e) => setActionData(prev => ({ ...prev, duration: parseInt(e.target.value) }))}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                              placeholder="Enter duration in days"
-                            />
+                            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                {availableMealTypes.length > 0 ? availableMealTypes.map(mealType => {
+                                  // Get current subscription meal types (IDs) or use actionData if modified
+                                  const currentSubscriptionMealIds = subscriptionData?.subscriptionHeader?.mealTypes || []
+                                  const selectedMealIds = actionData.mealTypes || currentSubscriptionMealIds
+                                  const isChecked = selectedMealIds.includes(mealType.id)
+
+                                  return (
+                                    <label key={mealType.id} className="flex items-center space-x-3 cursor-pointer hover:bg-white dark:hover:bg-gray-600 p-3 rounded-lg transition-colors">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                          console.log('🍽️ Meal type changed:', mealType.name, e.target.checked)
+                                          let newMealTypes
+                                          if (e.target.checked) {
+                                            newMealTypes = [...(actionData.mealTypes || currentSubscriptionMealIds).filter(id => id !== mealType.id), mealType.id]
+                                          } else {
+                                            newMealTypes = (actionData.mealTypes || currentSubscriptionMealIds).filter(id => id !== mealType.id)
+                                          }
+                                          const newActionData = { ...actionData, mealTypes: newMealTypes }
+                                          setActionData(prev => ({ ...prev, mealTypes: newMealTypes }))
+                                          triggerPlanPriceUpdate(newActionData)
+                                        }}
+                                        className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                                      />
+                                      <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">{mealType.name}</span>
+                                    </label>
+                                  )
+                                }) : (
+                                  <div className="col-span-full text-center text-gray-500 dark:text-gray-400 py-8">
+                                    <svg className="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                    </svg>
+                                    <p>No meal types available for this plan</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      {/* Payment Method */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Payment Method {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
-                        </label>
-                        {loadingRenewData ? (
-                          <div className="flex items-center justify-center py-4">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                      {/* Delivery Days Section */}
+                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center">
+                              <svg className="w-4 h-4 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Delivery Days</h3>
                           </div>
-                        ) : (
-                          <select
-                            value={actionData.paymentMethod !== undefined ? actionData.paymentMethod : (subscriptionData?.subscriptionHeader?.paymentMethod || '')}
-                            onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                          >
-                            <option value="">Select payment method...</option>
-                            {availablePaymentTypes.map((paymentType) => (
-                              <option key={paymentType.paymentID || paymentType.id} value={paymentType.paymentID || paymentType.id}>
-                                {paymentType.paymentName || paymentType.name}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </div>
-
-                      {/* Subscription From */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Subscription From
-                        </label>
-                        <select
-                          value={actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)}
-                          onChange={(e) => setActionData(prev => ({ ...prev, subscriptionType: parseInt(e.target.value) }))}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        >
-                          <option value={0}>Web</option>
-                          <option value={1}>Mobile Application</option>
-                          <option value={2}>Branch</option>
-                        </select>
-                      </div>
-
-                      {/* Branch - Only show when Branch is selected */}
-                      {(actionData.subscriptionType === 2 || (actionData.subscriptionType === undefined && subscriptionData?.subscriptionHeader?.subscriptionType === 2)) && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Branch
-                          </label>
-                          <select
-                            value={actionData.branchId !== undefined ? actionData.branchId : (subscriptionData?.subscriptionHeader?.branchId || '')}
-                            onChange={(e) => setActionData(prev => ({
-                              ...prev,
-                              branchId: parseInt(e.target.value) || null,
-                              branchName: branches.find(b => b.branchID === parseInt(e.target.value))?.branchName || ''
-                            }))}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                          >
-                            <option value="">Choose a branch...</option>
-                            {branches.map((branch) => (
-                              <option key={branch.branchID} value={branch.branchID}>
-                                {branch.branchName}
-                              </option>
-                            ))}
-                          </select>
                         </div>
-                      )}
 
-                      {/* Delivery Days */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Delivery Days {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
-                        </label>
-                        {loadingRenewData ? (
-                          <div className="flex items-center justify-center py-4">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                            {availableDeliveryDays.length > 0 ? availableDeliveryDays.map(deliveryDay => {
-                              // Get current subscription delivery days (IDs) or use actionData if modified
-                              const currentSubscriptionDayIds = subscriptionData?.subscriptionHeader?.deliveryDays || []
-                              const selectedDayIds = actionData.deliveryDays || currentSubscriptionDayIds
-                              const isChecked = selectedDayIds.includes(deliveryDay.day_id || deliveryDay.id)
-
-                              return (
-                                <label key={deliveryDay.day_id || deliveryDay.id} className="flex items-center space-x-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(e) => {
-                                      const dayId = deliveryDay.day_id || deliveryDay.id
-                                      if (e.target.checked) {
-                                        setActionData(prev => ({
-                                          ...prev,
-                                          deliveryDays: [...(prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId), dayId]
-                                        }))
-                                      } else {
-                                        setActionData(prev => ({
-                                          ...prev,
-                                          deliveryDays: (prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId)
-                                        }))
-                                      }
-                                    }}
-                                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                                  />
-                                  <span className="text-sm text-gray-700 dark:text-gray-300">{deliveryDay.day_name || deliveryDay.name}</span>
-                                </label>
-                              )
-                            }) : (
-                              <div className="col-span-full text-center text-gray-500 dark:text-gray-400 py-4">
-                                No delivery days available
+                        <div className="p-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Select Delivery Days {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                            </label>
+                            {!loadingRenewData && availableDeliveryDays.length > 0 && (
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const allDayIds = availableDeliveryDays.map(day => day.day_id || day.id)
+                                    setActionData(prev => ({ ...prev, deliveryDays: allDayIds }))
+                                  }}
+                                  className="text-xs px-3 py-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-md transition-colors font-medium"
+                                >
+                                  Select All
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActionData(prev => ({ ...prev, deliveryDays: [] }))
+                                  }}
+                                  className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-md transition-colors font-medium"
+                                >
+                                  Unselect All
+                                </button>
                               </div>
                             )}
                           </div>
-                        )}
+                          {loadingRenewData ? (
+                            <div className="flex items-center justify-center py-8">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                            </div>
+                          ) : (
+                            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {availableDeliveryDays.length > 0 ? availableDeliveryDays.map(deliveryDay => {
+                                  // Get current subscription delivery days (IDs) or use actionData if modified
+                                  const currentSubscriptionDayIds = subscriptionData?.subscriptionHeader?.deliveryDays || []
+                                  const selectedDayIds = actionData.deliveryDays || currentSubscriptionDayIds
+                                  const isChecked = selectedDayIds.includes(deliveryDay.day_id || deliveryDay.id)
+
+                                  return (
+                                    <label key={deliveryDay.day_id || deliveryDay.id} className="flex items-center space-x-3 cursor-pointer hover:bg-white dark:hover:bg-gray-600 p-3 rounded-lg transition-colors">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                          const dayId = deliveryDay.day_id || deliveryDay.id
+                                          if (e.target.checked) {
+                                            setActionData(prev => ({
+                                              ...prev,
+                                              deliveryDays: [...(prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId), dayId]
+                                            }))
+                                          } else {
+                                            setActionData(prev => ({
+                                              ...prev,
+                                              deliveryDays: (prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId)
+                                            }))
+                                          }
+                                        }}
+                                        className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                                      />
+                                      <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">{deliveryDay.day_name || deliveryDay.name}</span>
+                                    </label>
+                                  )
+                                }) : (
+                                  <div className="col-span-full text-center text-gray-500 dark:text-gray-400 py-8">
+                                    <svg className="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3a2 2 0 012-2h4a2 2 0 012 2v4m-6 0V6a2 2 0 012-2h4a2 2 0 012 2v1m-6 0h8m-8 0H6a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-2" />
+                                    </svg>
+                                    <p>No delivery days available</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Meal Types */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Meal Types {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
-                        </label>
-                        {loadingRenewData ? (
-                          <div className="flex items-center justify-center py-4">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                      {/* Gift Code Section */}
+                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-pink-100 dark:bg-pink-900/30 rounded-full flex items-center justify-center">
+                              <svg className="w-4 h-4 text-pink-600 dark:text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+                              </svg>
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Gift Code</h3>
                           </div>
-                        ) : (
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                            {availableMealTypes.length > 0 ? availableMealTypes.map(mealType => {
-                              // Get current subscription meal types (IDs) or use actionData if modified
-                              const currentSubscriptionMealIds = subscriptionData?.subscriptionHeader?.mealTypes || []
-                              const selectedMealIds = actionData.mealTypes || currentSubscriptionMealIds
-                              const isChecked = selectedMealIds.includes(mealType.id)
+                        </div>
 
-                              return (
-                                <label key={mealType.id} className="flex items-center space-x-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setActionData(prev => ({
-                                          ...prev,
-                                          mealTypes: [...(prev.mealTypes || currentSubscriptionMealIds).filter(id => id !== mealType.id), mealType.id]
-                                        }))
-                                      } else {
-                                        setActionData(prev => ({
-                                          ...prev,
-                                          mealTypes: (prev.mealTypes || currentSubscriptionMealIds).filter(id => id !== mealType.id)
-                                        }))
-                                      }
-                                    }}
-                                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                                  />
-                                  <span className="text-sm text-gray-700 dark:text-gray-300">{mealType.name}</span>
-                                </label>
-                              )
-                            }) : (
-                              <div className="col-span-full text-center text-gray-500 dark:text-gray-400 py-4">
-                                No meal types available for this plan
+                        <div className="p-6">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                              Gift Code (Optional)
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={actionData.giftCode || ''}
+                                onChange={(e) => setActionData(prev => ({ ...prev, giftCode: e.target.value }))}
+                                className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-pink-500 dark:focus:border-pink-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                placeholder="Enter gift code..."
+                              />
+                              <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+                                </svg>
                               </div>
-                            )}
+                            </div>
+                            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                              Enter a valid gift code to apply discounts or special offers to this subscription.
+                            </p>
                           </div>
-                        )}
+                        </div>
+                      </div>
+
+                      {/* Payment & Settings Section */}
+                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center">
+                              <svg className="w-4 h-4 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                              </svg>
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Payment & Settings</h3>
+                          </div>
+                        </div>
+
+                        <div className="p-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Payment Method */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                Payment Method {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                              </label>
+                              {loadingRenewData ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                </div>
+                              ) : (
+                                <select
+                                  value={actionData.paymentMethod !== undefined ? actionData.paymentMethod : (subscriptionData?.subscriptionHeader?.paymentMethod || '')}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                >
+                                  <option value="">Select payment method...</option>
+                                  {availablePaymentTypes.map((paymentType) => (
+                                    <option key={paymentType.paymentID || paymentType.id} value={paymentType.paymentID || paymentType.id}>
+                                      {paymentType.paymentName || paymentType.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+
+                            {/* Subscription From */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                Subscription From
+                              </label>
+                              <select
+                                value={actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)}
+                                onChange={(e) => setActionData(prev => ({ ...prev, subscriptionType: parseInt(e.target.value) }))}
+                                className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                              >
+                                <option value={0}>Web</option>
+                                <option value={1}>Mobile Application</option>
+                                <option value={2}>Branch</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Branch - Only show when Branch is selected */}
+                          {(actionData.subscriptionType === 2 || (actionData.subscriptionType === undefined && subscriptionData?.subscriptionHeader?.subscriptionType === 2)) && (
+                            <div className="mt-6">
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                Branch *
+                              </label>
+                              <select
+                                value={actionData.branchId !== undefined ? actionData.branchId : (subscriptionData?.subscriptionHeader?.branchId || '')}
+                                onChange={(e) => setActionData(prev => ({
+                                  ...prev,
+                                  branchId: parseInt(e.target.value) || null,
+                                  branchName: branches.find(b => b.branchID === parseInt(e.target.value))?.branchName || ''
+                                }))}
+                                className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                              >
+                                <option value="">Choose a branch...</option>
+                                {branches.map((branch) => (
+                                  <option key={branch.branchID} value={branch.branchID}>
+                                    {branch.branchName}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* Pricing Section */}
                       <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 space-y-4">
-                        <h4 className="font-medium text-gray-900 dark:text-white">Pricing & Discounts</h4>
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-medium text-gray-900 dark:text-white">Pricing & Discounts</h4>
+                          {loadingPlanPrice && (
+                            <div className="flex items-center space-x-2 text-blue-600 dark:text-blue-400">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                              <span className="text-xs">Calculating price...</span>
+                            </div>
+                          )}
+                        </div>
+
+
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div>
@@ -4535,7 +5029,7 @@ const ManageSubscriptions = () => {
                               step="0.01"
                               value={actionData.total || subscriptionData?.subscriptionHeader?.totalPrice || 3885}
                               onChange={(e) => setActionData(prev => ({ ...prev, total: parseFloat(e.target.value) }))}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                              className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             />
                           </div>
 
@@ -4548,7 +5042,7 @@ const ManageSubscriptions = () => {
                               step="0.01"
                               value={actionData.manualDiscount || 0}
                               onChange={(e) => setActionData(prev => ({ ...prev, manualDiscount: parseFloat(e.target.value) }))}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                              className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             />
                           </div>
 
@@ -4561,7 +5055,7 @@ const ManageSubscriptions = () => {
                               step="0.01"
                               value={actionData.bagValue || 0}
                               onChange={(e) => setActionData(prev => ({ ...prev, bagValue: parseFloat(e.target.value) }))}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                              className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             />
                           </div>
                         </div>
@@ -4573,12 +5067,91 @@ const ManageSubscriptions = () => {
                             id="withoutInvoice"
                             checked={actionData.withoutInvoice || false}
                             onChange={(e) => setActionData(prev => ({ ...prev, withoutInvoice: e.target.checked }))}
-                            className="rounded border-gray-300 dark:border-gray-600 text-green-600 focus:ring-green-500"
+                            className="rounded border-2 border-gray-300 dark:border-gray-600 text-green-600 focus:outline-none focus:border-green-500 dark:focus:border-green-400 transition-colors"
                           />
                           <label htmlFor="withoutInvoice" className="text-sm text-gray-700 dark:text-gray-300">
                             With Out Invoice
                           </label>
                         </div>
+
+                        {/* Plan Summary Section */}
+                        {Object.keys(planPriceData).length > 0 && (
+                          <div className="mt-6 bg-yellow-50 dark:bg-yellow-900/10 rounded-lg border border-yellow-200 dark:border-yellow-800 p-6">
+                            <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                              <span className="mr-2">💰</span>
+                              Plan Summary
+                            </h4>
+
+                            {loadingPlanPrice ? (
+                              <div className="flex items-center justify-center py-8">
+                                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                <span className="ml-3 text-gray-600 dark:text-gray-400">Calculating plan price...</span>
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                {/* Simple Summary List */}
+                                <div className="space-y-3">
+                                  <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Plan Amount</span>
+                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                      ${(planPriceData.planAmount || 0).toFixed(2)}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                      Tax ({((planPriceData.taxRate || 0) * 100).toFixed(1)}%)
+                                    </span>
+                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                      ${(planPriceData.taxAmount || 0).toFixed(2)}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Manual Discount</span>
+                                    <span className="text-sm font-semibold text-red-600 dark:text-red-400">
+                                      -${(actionData.manualDiscount || 0).toFixed(2)}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Delivery Fees</span>
+                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                      ${(planPriceData.deliveryFees || 0).toFixed(2)}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Bag Value</span>
+                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                      ${(actionData.bagValue || 0).toFixed(2)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Total Amount */}
+                                <div className="mt-4 pt-4 border-t-2 border-gray-300 dark:border-gray-600">
+                                  <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-lg font-semibold text-gray-900 dark:text-white">Total Amount</span>
+                                      <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                                        ${(() => {
+                                          const planAmount = planPriceData.planAmount || 0
+                                          const taxAmount = planPriceData.taxAmount || 0
+                                          const deliveryFees = planPriceData.deliveryFees || 0
+                                          const bagValue = actionData.bagValue || 0
+                                          const manualDiscount = actionData.manualDiscount || 0
+                                          const calculatedTotal = planAmount + taxAmount + deliveryFees + bagValue - manualDiscount
+                                          return calculatedTotal.toFixed(2)
+                                        })()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Notes */}
@@ -4590,7 +5163,7 @@ const ManageSubscriptions = () => {
                           value={actionData.notes || ''}
                           onChange={(e) => setActionData(prev => ({ ...prev, notes: e.target.value }))}
                           rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           placeholder="Enter any additional notes..."
                         />
                       </div>

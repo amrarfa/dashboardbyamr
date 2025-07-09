@@ -240,12 +240,30 @@ const ManageSubscriptions = () => {
 
     // Additional validation for arrays
     if (!mealTypes || mealTypes.length === 0) {
-      console.log('⚠️ GetPlanPrice: No meal types selected')
+      console.log('⚠️ GetPlanPrice: No meal types selected - clearing pricing data')
+      // Clear pricing data when no meal types selected
+      setPlanPriceData({
+        planAmount: 0,
+        taxAmount: 0,
+        taxRate: 0,
+        deliveryFees: 0,
+        discountValue: 0,
+        totalAmount: 0
+      })
       return
     }
 
     if (!deliveryDays || deliveryDays.length === 0) {
-      console.log('⚠️ GetPlanPrice: No delivery days selected')
+      console.log('⚠️ GetPlanPrice: No delivery days selected - clearing pricing data')
+      // Clear pricing data when no delivery days selected
+      setPlanPriceData({
+        planAmount: 0,
+        taxAmount: 0,
+        taxRate: 0,
+        deliveryFees: 0,
+        discountValue: 0,
+        totalAmount: 0
+      })
       return
     }
 
@@ -322,20 +340,32 @@ const ManageSubscriptions = () => {
     }
   }
 
-  // Auto-calculate total when pricing components change
+  // Auto-update tax amount when API returns new data (but allow user to override)
+  useEffect(() => {
+    // Only update tax amount if user hasn't manually set it and API has data
+    if (Object.keys(planPriceData).length > 0 && planPriceData.taxAmount !== undefined) {
+      if (!actionData.taxAmount || actionData.taxAmount === 0) {
+        console.log('🔄 Auto-updating tax amount from API:', planPriceData.taxAmount)
+        setActionData(prev => ({ ...prev, taxAmount: planPriceData.taxAmount }))
+      }
+    }
+  }, [planPriceData.taxAmount, planPriceData])
+
+  // Auto-update total when API returns new data (but allow user to override)
   useEffect(() => {
     const planAmount = planPriceData.planAmount || 0
-    const taxAmount = planPriceData.taxAmount || 0
+    const taxAmount = actionData.taxAmount || planPriceData.taxAmount || 0
     const deliveryFees = planPriceData.deliveryFees || 0
     const bagValue = actionData.bagValue || 0
     const manualDiscount = actionData.manualDiscount || 0
     const calculatedTotal = planAmount + taxAmount + deliveryFees + bagValue - manualDiscount
 
-    // Only update if the calculated total is different from current total
-    if (calculatedTotal !== (actionData.total || 0) && (planAmount > 0 || taxAmount > 0 || deliveryFees > 0)) {
+    // Only auto-update total if user hasn't manually set it and API has meaningful data
+    if (Object.keys(planPriceData).length > 0 && (!actionData.total || actionData.total === 0)) {
+      console.log('🔄 Auto-updating total from API calculation:', calculatedTotal)
       setActionData(prev => ({ ...prev, total: calculatedTotal }))
     }
-  }, [planPriceData.planAmount, planPriceData.taxAmount, planPriceData.deliveryFees, actionData.bagValue, actionData.manualDiscount])
+  }, [planPriceData.planAmount, planPriceData.taxAmount, planPriceData.deliveryFees, actionData.bagValue, actionData.manualDiscount, planPriceData])
 
   // Helper function to trigger plan price calculation
   const triggerPlanPriceUpdate = (newActionData) => {
@@ -4108,14 +4138,14 @@ const ManageSubscriptions = () => {
 
         {/* Action Dialog */}
         {showActionDialog && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[85vh] overflow-y-auto ${
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
+            <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-h-[90vh] overflow-y-auto ${
               selectedAction?.type === 'unrestrict' ? 'max-w-lg' :
               selectedAction?.type === 'mergeUnmerge' ? 'max-w-6xl' :
               selectedAction?.type === 'renew' ? 'max-w-6xl' : 'max-w-md'
             }`}>
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">
                       {selectedAction?.type === 'activate' && 'Activate Subscription'}
@@ -4156,7 +4186,7 @@ const ManageSubscriptions = () => {
                 </div>
 
                 {/* Dialog Content */}
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {/* Extend Days Form */}
                   {selectedAction?.type === 'extendDays' && (
                     <div className="space-y-4">
@@ -4562,13 +4592,13 @@ const ManageSubscriptions = () => {
 
                   {/* Renew Subscription Form */}
                   {selectedAction?.type === 'renew' && (
-                    <div className="space-y-6">
+                    <div className="space-y-4">
                       {console.log('🎯 Renew form is rendering!', { selectedAction, actionData })}
 
 
                       {/* Schedule & Duration Section */}
                       <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
-                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
                               <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4581,7 +4611,7 @@ const ManageSubscriptions = () => {
                         </div>
 
 
-                        <div className="p-6">
+                        <div className="p-4">
                           <div className="space-y-4">
                             {/* Labels Row */}
                             <div className="grid grid-cols-2 gap-6">
@@ -4696,7 +4726,7 @@ const ManageSubscriptions = () => {
 
                       {/* Meal Types Section */}
                       <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
-                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
                               <svg className="w-4 h-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4707,8 +4737,8 @@ const ManageSubscriptions = () => {
                           </div>
                         </div>
 
-                        <div className="p-6">
-                          <div className="flex items-center justify-between mb-4">
+                        <div className="p-4">
+                          <div className="flex items-center justify-between mb-3">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                               Select Meal Types {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
                             </label>
@@ -4791,7 +4821,7 @@ const ManageSubscriptions = () => {
 
                       {/* Delivery Days Section */}
                       <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
-                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center">
                               <svg className="w-4 h-4 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4802,8 +4832,8 @@ const ManageSubscriptions = () => {
                           </div>
                         </div>
 
-                        <div className="p-6">
-                          <div className="flex items-center justify-between mb-4">
+                        <div className="p-4">
+                          <div className="flex items-center justify-between mb-3">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                               Select Delivery Days {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
                             </label>
@@ -4882,9 +4912,58 @@ const ManageSubscriptions = () => {
                         </div>
                       </div>
 
+                      {/* Without Invoice Checkbox */}
+                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                        <div className="p-4">
+                          <div className="space-y-3">
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id="withoutInvoice"
+                                checked={actionData.withoutInvoice || false}
+                                onChange={(e) => {
+                                  const isChecked = e.target.checked
+                                  setActionData(prev => ({
+                                    ...prev,
+                                    withoutInvoice: isChecked,
+                                    // Reset billing fields when enabling "without invoice"
+                                    ...(isChecked ? {
+                                      total: 0,
+                                      taxAmount: 0,
+                                      manualDiscount: 0,
+                                      bagValue: 0
+                                    } : {})
+                                  }))
+                                }}
+                                className="rounded border-2 border-gray-300 dark:border-gray-600 text-green-600 focus:outline-none focus:border-green-500 dark:focus:border-green-400 transition-colors"
+                              />
+                              <label htmlFor="withoutInvoice" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                With Out Invoice
+                              </label>
+                            </div>
+
+                            {/* Info message when without invoice is selected */}
+                            {actionData.withoutInvoice && (
+                              <div className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 rounded-lg p-3">
+                                <div className="flex items-center space-x-2">
+                                  <svg className="w-5 h-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <span className="text-sm text-green-700 dark:text-green-300 font-medium">
+                                    Billing disabled - Gift Code, Payment, Pricing & Attach Files sections are hidden
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {!actionData.withoutInvoice && (
+                      <>
                       {/* Gift Code Section */}
                       <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
-                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 bg-pink-100 dark:bg-pink-900/30 rounded-full flex items-center justify-center">
                               <svg className="w-4 h-4 text-pink-600 dark:text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4895,7 +4974,7 @@ const ManageSubscriptions = () => {
                           </div>
                         </div>
 
-                        <div className="p-6">
+                        <div className="p-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                               Gift Code (Optional)
@@ -4923,7 +5002,7 @@ const ManageSubscriptions = () => {
 
                       {/* Payment & Settings Section */}
                       <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
-                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center">
                               <svg className="w-4 h-4 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4934,8 +5013,8 @@ const ManageSubscriptions = () => {
                           </div>
                         </div>
 
-                        <div className="p-6">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {/* Payment Method */}
                             <div>
                               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -5004,7 +5083,11 @@ const ManageSubscriptions = () => {
                           )}
                         </div>
                       </div>
+                      </>
+                      )}
 
+                      {!actionData.withoutInvoice && (
+                      <>
                       {/* Pricing Section */}
                       <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 space-y-4">
                         <div className="flex items-center justify-between">
@@ -5019,7 +5102,8 @@ const ManageSubscriptions = () => {
 
 
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {!actionData.withoutInvoice && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               Total
@@ -5027,8 +5111,40 @@ const ManageSubscriptions = () => {
                             <input
                               type="number"
                               step="0.01"
-                              value={actionData.total || subscriptionData?.subscriptionHeader?.totalPrice || 3885}
-                              onChange={(e) => setActionData(prev => ({ ...prev, total: parseFloat(e.target.value) }))}
+                              value={actionData.total !== undefined ? actionData.total : (subscriptionData?.subscriptionHeader?.totalPrice || '')}
+                              onChange={(e) => {
+                                const value = e.target.value
+                                console.log('💰 Total input changed:', value)
+                                // Allow empty string, zero, and valid numbers
+                                if (value === '') {
+                                  setActionData(prev => ({ ...prev, total: '' }))
+                                } else {
+                                  const numValue = parseFloat(value)
+                                  setActionData(prev => ({ ...prev, total: isNaN(numValue) ? '' : numValue }))
+                                }
+                              }}
+                              className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Tax Amount
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={actionData.taxAmount !== undefined ? actionData.taxAmount : (planPriceData.taxAmount || '')}
+                              onChange={(e) => {
+                                const value = e.target.value
+                                // Allow empty string, zero, and valid numbers
+                                if (value === '') {
+                                  setActionData(prev => ({ ...prev, taxAmount: '' }))
+                                } else {
+                                  const numValue = parseFloat(value)
+                                  setActionData(prev => ({ ...prev, taxAmount: isNaN(numValue) ? '' : numValue }))
+                                }
+                              }}
                               className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             />
                           </div>
@@ -5040,8 +5156,17 @@ const ManageSubscriptions = () => {
                             <input
                               type="number"
                               step="0.01"
-                              value={actionData.manualDiscount || 0}
-                              onChange={(e) => setActionData(prev => ({ ...prev, manualDiscount: parseFloat(e.target.value) }))}
+                              value={actionData.manualDiscount !== undefined ? actionData.manualDiscount : ''}
+                              onChange={(e) => {
+                                const value = e.target.value
+                                // Allow empty string, zero, and valid numbers
+                                if (value === '') {
+                                  setActionData(prev => ({ ...prev, manualDiscount: '' }))
+                                } else {
+                                  const numValue = parseFloat(value)
+                                  setActionData(prev => ({ ...prev, manualDiscount: isNaN(numValue) ? '' : numValue }))
+                                }
+                              }}
                               className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             />
                           </div>
@@ -5053,31 +5178,29 @@ const ManageSubscriptions = () => {
                             <input
                               type="number"
                               step="0.01"
-                              value={actionData.bagValue || 0}
-                              onChange={(e) => setActionData(prev => ({ ...prev, bagValue: parseFloat(e.target.value) }))}
+                              value={actionData.bagValue !== undefined ? actionData.bagValue : ''}
+                              onChange={(e) => {
+                                const value = e.target.value
+                                // Allow empty string, zero, and valid numbers
+                                if (value === '') {
+                                  setActionData(prev => ({ ...prev, bagValue: '' }))
+                                } else {
+                                  const numValue = parseFloat(value)
+                                  setActionData(prev => ({ ...prev, bagValue: isNaN(numValue) ? '' : numValue }))
+                                }
+                              }}
                               className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             />
                           </div>
                         </div>
+                        )}
 
-                        {/* Without Invoice Checkbox */}
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            id="withoutInvoice"
-                            checked={actionData.withoutInvoice || false}
-                            onChange={(e) => setActionData(prev => ({ ...prev, withoutInvoice: e.target.checked }))}
-                            className="rounded border-2 border-gray-300 dark:border-gray-600 text-green-600 focus:outline-none focus:border-green-500 dark:focus:border-green-400 transition-colors"
-                          />
-                          <label htmlFor="withoutInvoice" className="text-sm text-gray-700 dark:text-gray-300">
-                            With Out Invoice
-                          </label>
-                        </div>
+
 
                         {/* Plan Summary Section */}
-                        {Object.keys(planPriceData).length > 0 && (
-                          <div className="mt-6 bg-yellow-50 dark:bg-yellow-900/10 rounded-lg border border-yellow-200 dark:border-yellow-800 p-6">
-                            <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                        {Object.keys(planPriceData).length > 0 && !actionData.withoutInvoice && (
+                          <div className="mt-4 bg-yellow-50 dark:bg-yellow-900/10 rounded-lg border border-yellow-200 dark:border-yellow-800 p-4">
+                            <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center">
                               <span className="mr-2">💰</span>
                               Plan Summary
                             </h4>
@@ -5094,7 +5217,7 @@ const ManageSubscriptions = () => {
                                   <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Plan Amount</span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                      ${(planPriceData.planAmount || 0).toFixed(2)}
+                                      ${(actionData.total !== undefined && actionData.total !== '' ? actionData.total : (planPriceData.planAmount || 0)).toFixed(2)}
                                     </span>
                                   </div>
 
@@ -5103,14 +5226,14 @@ const ManageSubscriptions = () => {
                                       Tax ({((planPriceData.taxRate || 0) * 100).toFixed(1)}%)
                                     </span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                      ${(planPriceData.taxAmount || 0).toFixed(2)}
+                                      ${(actionData.taxAmount !== undefined && actionData.taxAmount !== '' ? actionData.taxAmount : (planPriceData.taxAmount || 0)).toFixed(2)}
                                     </span>
                                   </div>
 
                                   <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Manual Discount</span>
                                     <span className="text-sm font-semibold text-red-600 dark:text-red-400">
-                                      -${(actionData.manualDiscount || 0).toFixed(2)}
+                                      -${(actionData.manualDiscount !== undefined && actionData.manualDiscount !== '' ? actionData.manualDiscount : 0).toFixed(2)}
                                     </span>
                                   </div>
 
@@ -5124,7 +5247,7 @@ const ManageSubscriptions = () => {
                                   <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Bag Value</span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                      ${(actionData.bagValue || 0).toFixed(2)}
+                                      ${(actionData.bagValue !== undefined && actionData.bagValue !== '' ? actionData.bagValue : 0).toFixed(2)}
                                     </span>
                                   </div>
                                 </div>
@@ -5135,15 +5258,7 @@ const ManageSubscriptions = () => {
                                     <div className="flex justify-between items-center">
                                       <span className="text-lg font-semibold text-gray-900 dark:text-white">Total Amount</span>
                                       <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                                        ${(() => {
-                                          const planAmount = planPriceData.planAmount || 0
-                                          const taxAmount = planPriceData.taxAmount || 0
-                                          const deliveryFees = planPriceData.deliveryFees || 0
-                                          const bagValue = actionData.bagValue || 0
-                                          const manualDiscount = actionData.manualDiscount || 0
-                                          const calculatedTotal = planAmount + taxAmount + deliveryFees + bagValue - manualDiscount
-                                          return calculatedTotal.toFixed(2)
-                                        })()}
+                                        ${(actionData.total || subscriptionData?.subscriptionHeader?.totalPrice || 0).toFixed(2)}
                                       </span>
                                     </div>
                                   </div>
@@ -5153,6 +5268,8 @@ const ManageSubscriptions = () => {
                           </div>
                         )}
                       </div>
+                      </>
+                      )}
 
                       {/* Notes */}
                       <div>
@@ -5168,7 +5285,7 @@ const ManageSubscriptions = () => {
                         />
                       </div>
 
-                      {/* File Upload */}
+                      {!actionData.withoutInvoice && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Attach Files
@@ -5196,6 +5313,7 @@ const ManageSubscriptions = () => {
                           )}
                         </div>
                       </div>
+                      )}
                     </div>
                   )}
 

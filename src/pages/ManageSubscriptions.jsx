@@ -4666,6 +4666,7 @@ const ManageSubscriptions = () => {
                                     onChange={(e) => setActionData(prev => ({ ...prev, startDate: e.target.value }))}
                                     className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
                                     placeholder="dd/mm/yyyy"
+                                    min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
                                   />
                                 </div>
 
@@ -5369,7 +5370,7 @@ const ManageSubscriptions = () => {
                     {actionLoading && (
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                     )}
-                    {actionLoading ? 'Processing...' : 'Submit'}
+                    {actionLoading ? 'Processing...' : (selectedAction?.type === 'renew' ? 'Renew' : 'Submit')}
                   </button>
                 </div>
               </div>

@@ -984,6 +984,7 @@ const ManageSubscriptions = () => {
   // Load customer address data for change address action
   const loadChangeCustomerAddressData = async () => {
     const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+    const currentSubscriptionId = subscriptionData?.subscriptionHeader?.subscriptionId || subscriptionData?.subscriptionHeader?.id
 
     if (!customerId) {
       console.error('❌ No customer ID found for loading customer address data')
@@ -991,14 +992,21 @@ const ManageSubscriptions = () => {
       return
     }
 
+    if (!currentSubscriptionId) {
+      console.error('❌ No subscription ID found for loading customer address data')
+      setChangeCustomerAddressData([])
+      return
+    }
+
     setLoadingChangeCustomerAddress(true)
     console.log('🏠 Loading customer address data for customer ID:', customerId)
+    console.log('🏠 Using subscription ID:', currentSubscriptionId)
 
     try {
-      // Load both address data and areas
-      console.log('📡 Calling GetCustomerAddress API...')
+      // Load both address data and areas using ActionsManager endpoint
+      console.log('📡 Calling GetCustomerAdress API...')
       const [addressResponse, areasResponse] = await Promise.all([
-        fetch(`http://eg.localhost:7167/api/v1/ActionsManager/subscription/${customerId}/GetCustomerAddress`, {
+        fetch(`http://eg.localhost:7167/api/v1/ActionsManager/subscription/${customerId}/GetCustomerAdress`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json'
@@ -1026,19 +1034,20 @@ const ManageSubscriptions = () => {
       setAreas(areasData)
 
       // Pre-populate form with existing address data
-      const addressNumbers = {}
-      addressArray.forEach(address => {
-        // Set the first address as default values for the form
-        if (!addressNumbers.branch) {
-          addressNumbers.branch = address.branchId || ''
-          addressNumbers.area = address.areaId || ''
-          addressNumbers.address = address.address || ''
-          addressNumbers.isDefault = address.isDefault || false
-        }
-      })
+      const addressFormData = {}
 
-      console.log('🏠 Pre-populated address data:', addressNumbers)
-      setActionData(prev => ({ ...prev, ...addressNumbers }))
+      // Find the default address or use the first one
+      const defaultAddress = addressArray.find(addr => addr.isDefault) || addressArray[0]
+
+      if (defaultAddress) {
+        addressFormData.branch = defaultAddress.branchId || ''
+        addressFormData.area = defaultAddress.areaId || ''
+        addressFormData.address = defaultAddress.address || ''
+        addressFormData.isDefault = defaultAddress.isDefault || false
+      }
+
+      console.log('🏠 Pre-populated address data:', addressFormData)
+      setActionData(prev => ({ ...prev, ...addressFormData }))
 
     } catch (error) {
       console.error('❌ Error loading customer address data:', error)
@@ -6461,35 +6470,23 @@ const ManageSubscriptions = () => {
 
                       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
                         <div className="p-4">
-                          {/* Show current customer addresses */}
-                          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                            <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">Current Addresses:</h4>
-                            {loadingChangeCustomerAddress ? (
-                              <div className="flex items-center gap-2">
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                <span className="text-sm text-blue-600 dark:text-blue-300">Loading addresses...</span>
-                              </div>
-                            ) : changeCustomerAddressData.length > 0 ? (
-                              <div className="space-y-2">
-                                {changeCustomerAddressData.map((address, index) => (
-                                  <div key={index} className="text-sm text-blue-700 dark:text-blue-300 bg-white dark:bg-gray-700 p-2 rounded border">
-                                    <div className="flex items-center justify-between">
-                                      <div>
-                                        <span className="font-medium">Area ID: {address.areaId}</span>
-                                        {address.isDefault && <span className="ml-2 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs rounded">Default</span>}
-                                      </div>
-                                    </div>
-                                    <div className="mt-1 text-gray-600 dark:text-gray-400">{address.address || 'No address details'}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-sm text-blue-600 dark:text-blue-300">No addresses found</span>
-                            )}
-                          </div>
-
                           {/* Address Form */}
                           <div className="space-y-4">
+                            {/* Form Header */}
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                {changeCustomerAddressData.length > 0 ? 'Update Address' : 'Add New Address'}
+                              </h4>
+                              {changeCustomerAddressData.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setActionData(prev => ({ ...prev, branch: '', area: '', address: '', isDefault: false }))}
+                                  className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                                >
+                                  Clear Form
+                                </button>
+                              )}
+                            </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               {/* Branch Selection */}
                               <div>

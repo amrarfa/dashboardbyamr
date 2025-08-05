@@ -454,6 +454,23 @@ const ManageSubscriptions = () => {
   const [loadingPlanData, setLoadingPlanData] = useState(false)
   const [loadingRenewData, setLoadingRenewData] = useState(false)
 
+  // Change meal types form data states
+  const [changeMealTypesData, setChangeMealTypesData] = useState([])
+  const [loadingChangeMealTypes, setLoadingChangeMealTypes] = useState(false)
+
+  // Change delivery days form data states
+  const [changeDeliveryDaysData, setChangeDeliveryDaysData] = useState([])
+  const [loadingChangeDeliveryDays, setLoadingChangeDeliveryDays] = useState(false)
+
+  // Change customer phone form data states
+  const [changeCustomerPhoneData, setChangeCustomerPhoneData] = useState([])
+  const [loadingChangeCustomerPhone, setLoadingChangeCustomerPhone] = useState(false)
+
+  // Change customer address form data states
+  const [changeCustomerAddressData, setChangeCustomerAddressData] = useState([])
+  const [loadingChangeCustomerAddress, setLoadingChangeCustomerAddress] = useState(false)
+  const [areas, setAreas] = useState([])
+
   // Load branches data
   const loadBranches = async () => {
     try {
@@ -570,27 +587,42 @@ const ManageSubscriptions = () => {
       console.log('📋 Loading meal types and delivery days for plan identifier:', planIdentifier)
       console.log('📋 About to call apiService methods...')
 
-      // Make parallel API calls for meal types, delivery days, and plan days (duration)
+      // Get subscription type and branch for payment methods API
+      const subscriptionType = subscriptionData?.subscriptionHeader?.subscriptionType || 0
+      const branchId = subscriptionType === 2 ? (subscriptionData?.subscriptionHeader?.branchId || 0) : 0
+
+      console.log('💳 Payment method params - subscriptionType:', subscriptionType, 'branchId:', branchId)
+
+      // Make parallel API calls for meal types, delivery days, plan days (duration), and payment methods
       console.log('🔄 Making parallel API calls...')
-      const [mealTypesResponse, deliveryDaysResponse, planDaysResponse] = await Promise.all([
+      const [mealTypesResponse, deliveryDaysResponse, planDaysResponse, paymentMethodsResponse] = await Promise.all([
         apiService.getMealsTypes(planIdentifier),
         apiService.getDeliveryDays(),
-        apiService.getPlanDays(planIdentifier)
+        apiService.getPlanDays(planIdentifier),
+        fetch(`http://eg.localhost:7167/api/v1/CreateSubscriptions/GetPaymentType?SubscriptionType=${subscriptionType}&branch=${branchId}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }).then(response => response.json())
       ])
 
-      console.log('✅ All three API calls completed!')
+      console.log('✅ All four API calls completed!')
       console.log('🍽️ Raw meal types API response:', mealTypesResponse)
       console.log('📅 Raw delivery days API response:', deliveryDaysResponse)
       console.log('⏱️ Raw plan days API response:', planDaysResponse)
+      console.log('💳 Raw payment methods API response:', paymentMethodsResponse)
 
       // Extract data from responses
       const mealTypesData = mealTypesResponse?.data || mealTypesResponse || []
       const deliveryDaysData = deliveryDaysResponse?.data || deliveryDaysResponse || []
       const planDaysData = planDaysResponse?.data || planDaysResponse || []
+      const paymentMethodsData = paymentMethodsResponse?.data || paymentMethodsResponse || []
 
       console.log('🍽️ Extracted meal types data:', mealTypesData)
       console.log('📅 Extracted delivery days data:', deliveryDaysData)
       console.log('⏱️ Extracted plan days data:', planDaysData)
+      console.log('💳 Extracted payment methods data:', paymentMethodsData)
 
       // Transform meal types data
       const transformedMealTypes = mealTypesData.map(mealType => ({
@@ -616,25 +648,412 @@ const ManageSubscriptions = () => {
         dayCount: duration.dayCount
       }))
 
+      // Transform payment methods data
+      const transformedPaymentMethods = Array.isArray(paymentMethodsData) ? paymentMethodsData.map(payment => ({
+        paymentID: payment.paymentID || payment.id,
+        paymentName: payment.paymentName || payment.name,
+        id: payment.paymentID || payment.id,
+        name: payment.paymentName || payment.name
+      })) : []
+
       console.log('🍽️ Transformed meal types:', transformedMealTypes)
       console.log('📅 Transformed delivery days:', transformedDeliveryDays)
       console.log('⏱️ Transformed durations:', transformedDurations)
+      console.log('💳 Transformed payment methods:', transformedPaymentMethods)
 
-      // Set all three states
+      // Set all four states
       setAvailableMealTypes(transformedMealTypes)
       setAvailableDeliveryDays(transformedDeliveryDays)
       setAvailableDurations(transformedDurations)
+      setAvailablePaymentTypes(transformedPaymentMethods)
 
-      console.log('✅ Meal types, delivery days, and durations loaded successfully')
+      console.log('✅ Meal types, delivery days, durations, and payment methods loaded successfully')
 
     } catch (error) {
-      console.error('❌ Error loading meal types:', error)
+      console.error('❌ Error loading renew form data:', error)
       console.error('❌ Error details:', error.message)
       console.error('❌ Error stack:', error.stack)
       setAvailableMealTypes([])
+      setAvailableDeliveryDays([])
+      setAvailableDurations([])
+      setAvailablePaymentTypes([])
     } finally {
       console.log('🏁 Finally block - setting loading to false')
       setLoadingRenewData(false)
+    }
+  }
+
+  // Load payment methods based on subscription type and branch
+  const loadPaymentMethods = async (subscriptionType, branchId = 0) => {
+    try {
+      console.log('💳 Loading payment methods for subscriptionType:', subscriptionType, 'branchId:', branchId)
+
+      const response = await fetch(`http://eg.localhost:7167/api/v1/CreateSubscriptions/GetPaymentType?SubscriptionType=${subscriptionType}&branch=${branchId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const paymentMethodsResponse = await response.json()
+      console.log('💳 Payment methods API response:', paymentMethodsResponse)
+
+      const paymentMethodsData = paymentMethodsResponse?.data || paymentMethodsResponse || []
+
+      // Transform payment methods data
+      const transformedPaymentMethods = Array.isArray(paymentMethodsData) ? paymentMethodsData.map(payment => ({
+        paymentID: payment.paymentID || payment.id,
+        paymentName: payment.paymentName || payment.name,
+        id: payment.paymentID || payment.id,
+        name: payment.paymentName || payment.name
+      })) : []
+
+      console.log('💳 Transformed payment methods:', transformedPaymentMethods)
+      setAvailablePaymentTypes(transformedPaymentMethods)
+
+      // Reset payment method selection when options change
+      setActionData(prev => ({ ...prev, paymentMethod: '' }))
+
+    } catch (error) {
+      console.error('❌ Error loading payment methods:', error)
+      setAvailablePaymentTypes([])
+    }
+  }
+
+  // Load meal types for change meal types action
+  const loadChangeMealTypesData = async () => {
+    const planId = subscriptionData?.subscriptionHeader?.planId || subscriptionData?.subscriptionHeader?.planID
+    const subscriptionId = subscriptionData?.subscriptionHeader?.subscriptionId
+
+    if (!planId || !subscriptionId) {
+      console.error('❌ No plan ID or subscription ID found for loading meal types')
+      setChangeMealTypesData([])
+      return
+    }
+
+    setLoadingChangeMealTypes(true)
+    console.log('🍽️ Step 1: Loading ALL available meal types for plan ID:', planId)
+    console.log('🍽️ Step 2: Will then get SELECTED meal types for subscription ID:', subscriptionId)
+
+    try {
+      // Step 1: Get ALL available meal types for this plan
+      console.log('📡 Calling GetMealsTypes API...')
+      const availableMealTypesResponse = await fetch(`http://eg.localhost:7167/api/v1/CreateSubscriptions/GetMealsTypes?PlanID=${planId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!availableMealTypesResponse.ok) {
+        throw new Error(`HTTP error getting available meal types! status: ${availableMealTypesResponse.status}`)
+      }
+
+      const availableMealTypesData = await availableMealTypesResponse.json()
+      console.log('✅ Step 1 Complete - Available meal types API response:', availableMealTypesData)
+
+      const allMealTypesArray = availableMealTypesData?.data || availableMealTypesData || []
+
+      // Transform and group ALL available meal types by category
+      const groupedMealTypes = {}
+      allMealTypesArray.forEach(mealType => {
+        const categoryName = mealType.mealTypeCategoryName || 'MEAL'
+        if (!groupedMealTypes[categoryName]) {
+          groupedMealTypes[categoryName] = []
+        }
+        groupedMealTypes[categoryName].push({
+          id: mealType.mealTypeID,
+          name: mealType.mealTypeName,
+          categoryId: mealType.mealTypeCategoryID,
+          categoryName: mealType.mealTypeCategoryName
+        })
+      })
+
+      console.log('🍽️ All available meal types grouped by category:', groupedMealTypes)
+      setChangeMealTypesData(groupedMealTypes)
+
+      // Step 2: Get CURRENTLY SELECTED meal types for this subscription
+      console.log('📡 Calling GetSelectedMealType API...')
+      const selectedMealTypesResponse = await fetch(`http://eg.localhost:7167/api/v1/ActionsManager/subscription/GetSelectedMealType/${subscriptionId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!selectedMealTypesResponse.ok) {
+        throw new Error(`HTTP error getting selected meal types! status: ${selectedMealTypesResponse.status}`)
+      }
+
+      const selectedMealTypesData = await selectedMealTypesResponse.json()
+      console.log('✅ Step 2 Complete - Currently selected meal types API response:', selectedMealTypesData)
+
+      const selectedMealTypesArray = selectedMealTypesData?.data || selectedMealTypesData || []
+
+      // Extract selected meal type IDs from the API response
+      const selectedMealTypeIds = selectedMealTypesArray.map(mealType =>
+        mealType.mealTypeID || mealType.id || mealType
+      )
+
+      console.log('🎯 Customer currently has these meal types selected:', selectedMealTypeIds)
+      console.log('📊 Total available meal types:', allMealTypesArray.length)
+      console.log('📊 Customer selected meal types:', selectedMealTypeIds.length)
+
+      // Show user which meal types they currently have
+      const selectedMealTypeNames = allMealTypesArray
+        .filter(mt => selectedMealTypeIds.includes(mt.mealTypeID))
+        .map(mt => mt.mealTypeName)
+
+      console.log('📝 Customer selected meal type names:', selectedMealTypeNames)
+
+      setActionData(prev => ({
+        ...prev,
+        selectedMealTypes: selectedMealTypeIds,
+        currentlySelectedNames: selectedMealTypeNames // For display purposes
+      }))
+
+    } catch (error) {
+      console.error('❌ Error loading meal types for change action:', error)
+      setChangeMealTypesData({})
+      // Fallback to subscription header meal types if API fails
+      const fallbackMealTypes = subscriptionData?.subscriptionHeader?.mealTypes || []
+      setActionData(prev => ({ ...prev, selectedMealTypes: fallbackMealTypes }))
+    } finally {
+      setLoadingChangeMealTypes(false)
+    }
+  }
+
+  // Load delivery days for change delivery days action
+  const loadChangeDeliveryDaysData = async () => {
+    const subscriptionId = subscriptionData?.subscriptionHeader?.subscriptionId
+
+    if (!subscriptionId) {
+      console.error('❌ No subscription ID found for loading delivery days')
+      setChangeDeliveryDaysData([])
+      return
+    }
+
+    setLoadingChangeDeliveryDays(true)
+    console.log('📅 Step 1: Loading ALL available delivery days')
+    console.log('📅 Step 2: Will then get SELECTED delivery days for subscription ID:', subscriptionId)
+
+    try {
+      // Step 1: Get ALL available delivery days
+      console.log('📡 Calling GetDeliveryDays API...')
+      const availableDeliveryDaysResponse = await fetch(`http://eg.localhost:7167/api/v1/CreateSubscriptions/GetDeliveryDays`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!availableDeliveryDaysResponse.ok) {
+        throw new Error(`HTTP error getting available delivery days! status: ${availableDeliveryDaysResponse.status}`)
+      }
+
+      const availableDeliveryDaysData = await availableDeliveryDaysResponse.json()
+      console.log('✅ Step 1 Complete - Available delivery days API response:', availableDeliveryDaysData)
+
+      const allDeliveryDaysArray = availableDeliveryDaysData?.data || availableDeliveryDaysData || []
+
+      console.log('📅 All available delivery days:', allDeliveryDaysArray)
+      setChangeDeliveryDaysData(allDeliveryDaysArray)
+
+      // Step 2: Get CURRENTLY SELECTED delivery days for this subscription
+      console.log('📡 Calling GetSelectedDeliveryDays API...')
+      const selectedDeliveryDaysResponse = await fetch(`http://eg.localhost:7167/api/v1/ActionsManager/subscription/GetSelectedDeliveryDays/${subscriptionId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!selectedDeliveryDaysResponse.ok) {
+        throw new Error(`HTTP error getting selected delivery days! status: ${selectedDeliveryDaysResponse.status}`)
+      }
+
+      const selectedDeliveryDaysData = await selectedDeliveryDaysResponse.json()
+      console.log('✅ Step 2 Complete - Currently selected delivery days API response:', selectedDeliveryDaysData)
+
+      const selectedDeliveryDaysArray = selectedDeliveryDaysData?.data || selectedDeliveryDaysData || []
+
+      // Extract selected delivery day names from the API response
+      const selectedDeliveryDayNames = selectedDeliveryDaysArray.map(day =>
+        day.day_name || day.dayName || day.name || day
+      )
+
+      console.log('🎯 Customer currently has these delivery days selected:', selectedDeliveryDayNames)
+      console.log('📊 Total available delivery days:', allDeliveryDaysArray.length)
+      console.log('📊 Customer selected delivery days:', selectedDeliveryDayNames.length)
+
+      setActionData(prev => ({
+        ...prev,
+        selectedDeliveryDays: selectedDeliveryDayNames,
+        currentlySelectedDeliveryDays: selectedDeliveryDayNames // For display purposes
+      }))
+
+    } catch (error) {
+      console.error('❌ Error loading delivery days for change action:', error)
+      setChangeDeliveryDaysData([])
+      // Fallback to empty array if API fails
+      setActionData(prev => ({ ...prev, selectedDeliveryDays: [] }))
+    } finally {
+      setLoadingChangeDeliveryDays(false)
+    }
+  }
+
+  // Load customer phone data for change phone action
+  const loadChangeCustomerPhoneData = async () => {
+    const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+
+    if (!customerId) {
+      console.error('❌ No customer ID found for loading customer phone data')
+      setChangeCustomerPhoneData([])
+      return
+    }
+
+    setLoadingChangeCustomerPhone(true)
+    console.log('📞 Loading customer phone data for customer ID:', customerId)
+
+    try {
+      console.log('📡 Calling GetCustomerPhone API...')
+      const response = await fetch(`http://eg.localhost:7167/api/v1/ActionsManager/subscription/${customerId}/GetCustomerPhone`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error getting customer phone data! status: ${response.status}`)
+      }
+
+      const phoneData = await response.json()
+      console.log('✅ Customer phone data API response:', phoneData)
+
+      const phoneArray = phoneData?.data || []
+      console.log('📞 Customer phone numbers:', phoneArray)
+      console.log('📞 Phone array structure:', JSON.stringify(phoneArray, null, 2))
+
+      setChangeCustomerPhoneData(phoneArray)
+
+      // Pre-populate the action data with current phone numbers
+      const phoneNumbers = {
+        mobile: '',
+        workPhone: '',
+        homePhone: '',
+        otherPhone: ''
+      }
+
+      phoneArray.forEach(phone => {
+        const phoneType = phone.phoneType
+        if (phoneType === 'Mobile') {
+          phoneNumbers.mobile = phone.phone || ''
+        } else if (phoneType === 'Work Phone') {
+          phoneNumbers.workPhone = phone.phone || ''
+        } else if (phoneType === 'Home Phone') {
+          phoneNumbers.homePhone = phone.phone || ''
+        } else if (phoneType === 'Other Phone') {
+          phoneNumbers.otherPhone = phone.phone || ''
+        }
+      })
+
+      console.log('📞 Pre-populated phone numbers:', phoneNumbers)
+      setActionData(prev => ({ ...prev, ...phoneNumbers }))
+
+    } catch (error) {
+      console.error('❌ Error loading customer phone data:', error)
+      setChangeCustomerPhoneData([])
+      // Fallback to empty phone numbers if API fails
+      setActionData(prev => ({
+        ...prev,
+        mobile: '',
+        workPhone: '',
+        homePhone: '',
+        otherPhone: ''
+      }))
+    } finally {
+      setLoadingChangeCustomerPhone(false)
+    }
+  }
+
+  // Load customer address data for change address action
+  const loadChangeCustomerAddressData = async () => {
+    const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+
+    if (!customerId) {
+      console.error('❌ No customer ID found for loading customer address data')
+      setChangeCustomerAddressData([])
+      return
+    }
+
+    setLoadingChangeCustomerAddress(true)
+    console.log('🏠 Loading customer address data for customer ID:', customerId)
+
+    try {
+      // Load both address data and areas
+      console.log('📡 Calling GetCustomerAddress API...')
+      const [addressResponse, areasResponse] = await Promise.all([
+        fetch(`http://eg.localhost:7167/api/v1/ActionsManager/subscription/${customerId}/GetCustomerAddress`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }),
+        apiService.getAreas()
+      ])
+
+      if (!addressResponse.ok) {
+        throw new Error(`HTTP error getting customer address data! status: ${addressResponse.status}`)
+      }
+
+      const addressData = await addressResponse.json()
+      console.log('🏠 Customer address response:', addressData)
+
+      const addressArray = addressData?.data || []
+      console.log('🏠 Customer addresses:', addressArray)
+      console.log('🏠 Address array structure:', JSON.stringify(addressArray, null, 2))
+
+      setChangeCustomerAddressData(addressArray)
+
+      // Load areas data
+      const areasData = areasResponse?.data || areasResponse || []
+      console.log('🌍 Areas loaded:', areasData)
+      setAreas(areasData)
+
+      // Pre-populate form with existing address data
+      const addressNumbers = {}
+      addressArray.forEach(address => {
+        // Set the first address as default values for the form
+        if (!addressNumbers.branch) {
+          addressNumbers.branch = address.branchId || ''
+          addressNumbers.area = address.areaId || ''
+          addressNumbers.address = address.address || ''
+          addressNumbers.isDefault = address.isDefault || false
+        }
+      })
+
+      console.log('🏠 Pre-populated address data:', addressNumbers)
+      setActionData(prev => ({ ...prev, ...addressNumbers }))
+
+    } catch (error) {
+      console.error('❌ Error loading customer address data:', error)
+      setChangeCustomerAddressData([])
+      setAreas([])
+      // Fallback to empty address data if API fails
+      setActionData(prev => ({
+        ...prev,
+        branch: '',
+        area: '',
+        address: '',
+        isDefault: false
+      }))
+    } finally {
+      setLoadingChangeCustomerAddress(false)
     }
   }
 
@@ -1956,6 +2375,26 @@ const ManageSubscriptions = () => {
       return
     }
 
+    // Handle change meal types action specially
+    if (actionType === 'changeMealType') {
+      loadChangeMealTypesData()
+    }
+
+    // Handle change delivery days action specially
+    if (actionType === 'changeDeliveryDays') {
+      loadChangeDeliveryDaysData()
+    }
+
+    // Handle change customer phone action specially
+    if (actionType === 'changePhone') {
+      loadChangeCustomerPhoneData()
+    }
+
+    // Handle change customer address action specially
+    if (actionType === 'changeAddress') {
+      loadChangeCustomerAddressData()
+    }
+
     setSelectedAction({ type: actionType, category: actionCategory })
     setShowActionDialog(true)
     setActionData({}) // Reset action data
@@ -2386,6 +2825,399 @@ const ManageSubscriptions = () => {
           console.error('❌ API Error during renew:', apiError)
           throw new Error(`Failed to renew subscription: ${apiError.message}`)
         }
+      }
+
+      // Handle Change Meal Types action
+      if (selectedAction?.type === 'changeMealType') {
+        if (!formData.selectedMealTypes || formData.selectedMealTypes.length === 0) {
+          showError('Please select at least one meal type')
+          return
+        }
+
+        console.log('🍽️ Processing change meal types action with data:', formData)
+
+        // Prepare request body according to the API specification
+        const requestBody = {
+          mealTypes: formData.selectedMealTypes.map(mealTypeId => ({
+            mealTypeCategoryID: "", // Will be filled from meal type data
+            mealTypeCategoryName: "", // Will be filled from meal type data
+            mealTypeID: mealTypeId,
+            mealTypeName: "" // Will be filled from meal type data
+          })),
+          notes: formData.notes || "Meal types changed via subscription management"
+        }
+
+        // Enhance the meal types with category and name information
+        if (changeMealTypesData && Object.keys(changeMealTypesData).length > 0) {
+          requestBody.mealTypes = formData.selectedMealTypes.map(mealTypeId => {
+            // Find the meal type details from the loaded data
+            let mealTypeDetails = null
+            Object.entries(changeMealTypesData).forEach(([category, mealTypes]) => {
+              const found = mealTypes.find(mt => mt.id === mealTypeId)
+              if (found) {
+                mealTypeDetails = found
+              }
+            })
+
+            return {
+              mealTypeCategoryID: mealTypeDetails?.categoryId || "",
+              mealTypeCategoryName: mealTypeDetails?.categoryName || "",
+              mealTypeID: mealTypeId,
+              mealTypeName: mealTypeDetails?.name || ""
+            }
+          })
+        }
+
+        console.log('📤 Change meal types request body:', JSON.stringify(requestBody, null, 2))
+        console.log('📡 API URL:', `/api/v1/ActionsManager/subscription/${subscriptionId}/change-meal-types`)
+        console.log('📡 SID in headers:', subscriptionId)
+
+        const response = await makeApiCall(`/api/v1/ActionsManager/subscription/${subscriptionId}/change-meal-types`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'sid': subscriptionId.toString()
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 Change meal types response status:', response.status)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('❌ API Error Response:', errorText)
+          throw new Error(`Failed to change meal types: ${response.status} - ${errorText}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ Change meal types result:', result)
+
+        success('Meal types changed successfully!')
+
+        // Refresh subscription data
+        console.log('🔄 Refreshing subscription data by simulating SID search...')
+        await handleSearch(subscriptionId.toString(), 'sid')
+      }
+
+      // Handle Change Delivery Days action
+      if (selectedAction?.type === 'changeDeliveryDays') {
+        if (!formData.selectedDeliveryDays || formData.selectedDeliveryDays.length === 0) {
+          showError('Please select at least one delivery day')
+          return
+        }
+
+        console.log('📅 Processing change delivery days action with data:', formData)
+
+        // Prepare request body according to the API specification
+        const requestBody = {
+          deliveryDays: formData.selectedDeliveryDays.map(dayName => {
+            // Find the delivery day details from the loaded data
+            const dayDetails = changeDeliveryDaysData.find(day =>
+              (day.day_name || day.dayName || day.name || day) === dayName
+            )
+
+            return {
+              day_id: dayDetails?.day_id || dayDetails?.id || "",
+              day_name: dayName,
+              show: true
+            }
+          }),
+          notes: formData.notes || "Delivery days changed via subscription management"
+        }
+
+        console.log('📤 Change delivery days request body:', JSON.stringify(requestBody, null, 2))
+        console.log('📡 API URL:', `/api/v1/ActionsManager/subscription/${subscriptionId}/ChangeDeliveryDays`)
+        console.log('📡 SID in headers:', subscriptionId)
+
+        const response = await makeApiCall(`/api/v1/ActionsManager/subscription/${subscriptionId}/ChangeDeliveryDays`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'sid': subscriptionId.toString()
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 Change delivery days response status:', response.status)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('❌ API Error Response:', errorText)
+          throw new Error(`Failed to change delivery days: ${response.status} - ${errorText}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ Change delivery days result:', result)
+
+        success('Delivery days changed successfully!')
+
+        // Refresh subscription data
+        console.log('🔄 Refreshing subscription data by simulating SID search...')
+        await handleSearch(subscriptionId.toString(), 'sid')
+      }
+
+      // Handle Change Customer Name action
+      if (selectedAction?.type === 'changeCustomerName') {
+        if (!formData.customerName || formData.customerName.trim() === '') {
+          showError('Please enter a new customer name')
+          return
+        }
+
+        console.log('👤 Processing change customer name action with data:', formData)
+
+        const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+
+        if (!customerId) {
+          showError('Customer ID not found')
+          return
+        }
+
+        // Prepare request body according to the API specification
+        const requestBody = {
+          customerName: formData.customerName.trim(),
+          sid: subscriptionId
+        }
+
+        console.log('📤 Change customer name request body:', JSON.stringify(requestBody, null, 2))
+        console.log('📡 API URL:', `/api/v1/ActionsManager/customer/${customerId}/name`)
+        console.log('📡 Customer ID:', customerId)
+
+        const response = await makeApiCall(`/api/v1/ActionsManager/customer/${customerId}/name`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 Change customer name response status:', response.status)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('❌ API Error Response:', errorText)
+          throw new Error(`Failed to change customer name: ${response.status} - ${errorText}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ Change customer name result:', result)
+
+        success('Customer name changed successfully!')
+
+        // Refresh subscription data
+        console.log('🔄 Refreshing subscription data by simulating SID search...')
+        await handleSearch(subscriptionId.toString(), 'sid')
+      }
+
+      // Handle Change Customer Phone action
+      if (selectedAction?.type === 'changePhone') {
+        console.log('📞 Processing change customer phone action with data:', formData)
+
+        const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+
+        if (!customerId) {
+          showError('Customer ID not found')
+          return
+        }
+
+        // Prepare phone numbers array - include all phone types, send null for empty values
+        const customerPhones = []
+
+        // Helper function to find existing phone ID by type
+        const findPhoneId = (phoneType) => {
+          console.log('🔍 Looking for phone type:', phoneType)
+          console.log('🔍 Available phone data:', changeCustomerPhoneData)
+          console.log('🔍 Phone data length:', changeCustomerPhoneData?.length)
+
+          if (!changeCustomerPhoneData || changeCustomerPhoneData.length === 0) {
+            console.log('🔍 No phone data available, returning 0')
+            return 0
+          }
+
+          // Map the form phone types to API phone types
+          const phoneTypeMapping = {
+            'Mobile': 'Mobile',
+            'Work': 'Work Phone',
+            'Home': 'Home Phone',
+            'Other': 'Other Phone'
+          }
+
+          const apiPhoneType = phoneTypeMapping[phoneType] || phoneType
+          console.log('🔍 Mapped phone type:', phoneType, '->', apiPhoneType)
+
+          const existingPhone = changeCustomerPhoneData.find(phone => {
+            console.log('🔍 Checking phone:', phone)
+            console.log('🔍 Phone phoneType:', phone.phoneType)
+            console.log('🔍 Phone id:', phone.id)
+            const match = phone.phoneType === apiPhoneType
+            console.log('🔍 Match result:', match, '(', phone.phoneType, '===', apiPhoneType, ')')
+            return match
+          })
+
+          console.log('🔍 Found existing phone:', existingPhone)
+          const phoneId = existingPhone?.id || 0
+          console.log('🔍 Using phone ID:', phoneId, 'for type:', phoneType)
+
+          return phoneId
+        }
+
+        // Always include all phone types, use empty string for empty values
+        customerPhones.push({
+          id: findPhoneId("Mobile"),
+          phone: (formData.mobile && formData.mobile.trim()) ? formData.mobile.trim() : "",
+          phoneType: "Mobile"
+        })
+
+        customerPhones.push({
+          id: findPhoneId("Work"),
+          phone: (formData.workPhone && formData.workPhone.trim()) ? formData.workPhone.trim() : "",
+          phoneType: "Work"
+        })
+
+        customerPhones.push({
+          id: findPhoneId("Home"),
+          phone: (formData.homePhone && formData.homePhone.trim()) ? formData.homePhone.trim() : "",
+          phoneType: "Home"
+        })
+
+        customerPhones.push({
+          id: findPhoneId("Other"),
+          phone: (formData.otherPhone && formData.otherPhone.trim()) ? formData.otherPhone.trim() : "",
+          phoneType: "Other"
+        })
+
+        // Prepare request body according to the API specification
+        const requestBody = {
+          customerPhones: customerPhones,
+          sid: subscriptionId
+        }
+
+        console.log('📤 Change customer phone request body:', JSON.stringify(requestBody, null, 2))
+        console.log('📤 Customer phones array:', customerPhones)
+        console.log('📤 Change customer phone data state:', changeCustomerPhoneData)
+        console.log('📡 API URL:', `/api/v1/ActionsManager/customer/${customerId}/phones`)
+        console.log('📡 Customer ID:', customerId)
+
+        const response = await makeApiCall(`/api/v1/ActionsManager/customer/${customerId}/phones`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 Change customer phone response status:', response.status)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('❌ API Error Response:', errorText)
+          throw new Error(`Failed to change customer phone: ${response.status} - ${errorText}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ Change customer phone result:', result)
+
+        success('Customer phone numbers updated successfully!')
+
+        // Refresh subscription data
+        console.log('🔄 Refreshing subscription data by simulating SID search...')
+        await handleSearch(subscriptionId.toString(), 'sid')
+      }
+
+      // Handle Change Customer Address action
+      if (selectedAction?.type === 'changeAddress') {
+        console.log('🏠 Processing change customer address action with data:', formData)
+
+        const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+
+        if (!customerId) {
+          showError('Customer ID not found')
+          return
+        }
+
+        // Prepare addresses array - include all addresses with proper structure
+        const customerAddresses = []
+
+        // Helper function to find existing address ID
+        const findAddressId = (addressData) => {
+          const existingAddress = changeCustomerAddressData.find(addr =>
+            addr.areaId === addressData.areaId || addr.address === addressData.address
+          )
+          return existingAddress?.id || 0
+        }
+
+        // Add the address from form data
+        if (formData.area && formData.address) {
+          customerAddresses.push({
+            id: findAddressId({ areaId: formData.area, address: formData.address }),
+            areaId: parseInt(formData.area) || 0,
+            address: formData.address.trim(),
+            isDefault: formData.isDefault || false
+          })
+        }
+
+        // Add existing addresses that weren't modified
+        changeCustomerAddressData.forEach(existingAddr => {
+          const isModified = customerAddresses.some(newAddr =>
+            newAddr.id === existingAddr.id ||
+            (newAddr.areaId === existingAddr.areaId && newAddr.address === existingAddr.address)
+          )
+
+          if (!isModified) {
+            customerAddresses.push({
+              id: existingAddr.id,
+              areaId: existingAddr.areaId,
+              address: existingAddr.address || "",
+              isDefault: existingAddr.isDefault || false
+            })
+          }
+        })
+
+        if (customerAddresses.length === 0) {
+          showError('Please provide at least one address')
+          return
+        }
+
+        // Prepare request body according to the API specification
+        const requestBody = {
+          customerAddresses: customerAddresses,
+          sid: subscriptionId
+        }
+
+        console.log('📤 Change customer address request body:', JSON.stringify(requestBody, null, 2))
+        console.log('📤 Customer addresses array:', customerAddresses)
+        console.log('📤 Change customer address data state:', changeCustomerAddressData)
+        console.log('📡 API URL:', `/api/v1/ActionsManager/customer/${customerId}/addresses`)
+        console.log('📡 Customer ID:', customerId)
+
+        const response = await makeApiCall(`/api/v1/ActionsManager/customer/${customerId}/addresses`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 Change customer address response status:', response.status)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('❌ API Error Response:', errorText)
+          throw new Error(`Failed to change customer address: ${response.status} - ${errorText}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ Change customer address result:', result)
+
+        success('Customer address changed successfully!')
+
+        // Refresh subscription data
+        console.log('🔄 Refreshing subscription data by simulating SID search...')
+        await handleSearch(subscriptionId.toString(), 'sid')
       }
 
       // TODO: Implement other actions here
@@ -3285,11 +4117,11 @@ const ManageSubscriptions = () => {
                     </h4>
                     <div className="space-y-2">
                       <button
-                        onClick={() => handleActionClick('changeDeliveryDay', 'delivery')}
+                        onClick={() => handleActionClick('changeDeliveryDays', 'delivery')}
                         className="w-full text-left px-3 py-2 text-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
                       >
                         <Calendar className="h-4 w-4" />
-                        Change Delivery Day
+                        Change Delivery Days
                       </button>
                       <button
                         onClick={() => handleActionClick('changeStartDate', 'delivery')}
@@ -3313,7 +4145,7 @@ const ManageSubscriptions = () => {
                         className="w-full text-left px-3 py-2 text-sm bg-pink-50 hover:bg-pink-100 dark:bg-pink-900/20 dark:hover:bg-pink-900/30 text-pink-700 dark:text-pink-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
                       >
                         <User className="h-4 w-4" />
-                        Change Name
+                        Change Customer Name
                       </button>
                       <button
                         onClick={() => handleActionClick('changeAddress', 'customer')}
@@ -4141,8 +4973,13 @@ const ManageSubscriptions = () => {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
             <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-h-[90vh] overflow-y-auto ${
               selectedAction?.type === 'unrestrict' ? 'max-w-lg' :
-              selectedAction?.type === 'mergeUnmerge' ? 'max-w-6xl' :
-              selectedAction?.type === 'renew' ? 'max-w-6xl' : 'max-w-md'
+              selectedAction?.type === 'mergeUnmerge' ? 'max-w-5xl' :
+              selectedAction?.type === 'renew' ? 'max-w-5xl' :
+              selectedAction?.type === 'changeMealType' ? 'max-w-2xl' :
+              selectedAction?.type === 'changeDeliveryDays' ? 'max-w-2xl' :
+              selectedAction?.type === 'changeCustomerName' ? 'max-w-md' :
+              selectedAction?.type === 'changePhone' ? 'max-w-md' :
+              selectedAction?.type === 'changeAddress' ? 'max-w-2xl' : 'max-w-md'
             }`}>
               <div className="p-4">
                 <div className="flex items-center justify-between mb-4">
@@ -4170,7 +5007,6 @@ const ManageSubscriptions = () => {
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                       {selectedAction?.category === 'status' && 'Modify subscription status'}
                       {selectedAction?.category === 'days' && 'Manage subscription days'}
-                      {selectedAction?.category === 'meal' && 'Update meal preferences'}
                       {selectedAction?.category === 'delivery' && 'Adjust delivery settings'}
                       {selectedAction?.category === 'customer' && 'Update customer information'}
                       {selectedAction?.category === 'global' && 'Global subscription changes'}
@@ -5048,7 +5884,18 @@ const ManageSubscriptions = () => {
                               </label>
                               <select
                                 value={actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)}
-                                onChange={(e) => setActionData(prev => ({ ...prev, subscriptionType: parseInt(e.target.value) }))}
+                                onChange={(e) => {
+                                  const newSubscriptionType = parseInt(e.target.value)
+                                  setActionData(prev => ({
+                                    ...prev,
+                                    subscriptionType: newSubscriptionType,
+                                    branchId: newSubscriptionType === 2 ? prev.branchId : null // Reset branch if not Branch type
+                                  }))
+
+                                  // Reload payment methods based on new subscription type
+                                  const branchId = newSubscriptionType === 2 ? (actionData.branchId || 0) : 0
+                                  loadPaymentMethods(newSubscriptionType, branchId)
+                                }}
                                 className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
                               >
                                 <option value={0}>Web</option>
@@ -5066,11 +5913,18 @@ const ManageSubscriptions = () => {
                               </label>
                               <select
                                 value={actionData.branchId !== undefined ? actionData.branchId : (subscriptionData?.subscriptionHeader?.branchId || '')}
-                                onChange={(e) => setActionData(prev => ({
-                                  ...prev,
-                                  branchId: parseInt(e.target.value) || null,
-                                  branchName: branches.find(b => b.branchID === parseInt(e.target.value))?.branchName || ''
-                                }))}
+                                onChange={(e) => {
+                                  const newBranchId = parseInt(e.target.value) || null
+                                  setActionData(prev => ({
+                                    ...prev,
+                                    branchId: newBranchId,
+                                    branchName: branches.find(b => b.branchID === newBranchId)?.branchName || ''
+                                  }))
+
+                                  // Reload payment methods with new branch
+                                  const subscriptionType = actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)
+                                  loadPaymentMethods(subscriptionType, newBranchId || 0)
+                                }}
                                 className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
                               >
                                 <option value="">Choose a branch...</option>
@@ -5318,6 +6172,519 @@ const ManageSubscriptions = () => {
                     </div>
                   )}
 
+                  {/* Change Meal Types Form */}
+                  {selectedAction?.type === 'changeMealType' && (
+                    <div className="space-y-6">
+                      {console.log('🎯 Change meal types form is rendering!', { selectedAction, changeMealTypesData, actionData })}
+
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <div className="p-4">
+                          {/* Show currently selected meal types */}
+                          {!loadingChangeMealTypes && actionData.currentlySelectedNames && actionData.currentlySelectedNames.length > 0 && (
+                            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                                Currently Selected: {actionData.currentlySelectedNames.join(', ')}
+                              </p>
+                              <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                                ({actionData.currentlySelectedNames.length} of {Object.values(changeMealTypesData).flat().length} available meal types)
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-4">
+                          {loadingChangeMealTypes ? (
+                            <div className="flex items-center justify-center py-8">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                              <span className="ml-3 text-gray-600 dark:text-gray-400">Loading meal types...</span>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Meal Category Column */}
+                              <div>
+                                <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-4 h-48 flex items-center justify-center">
+                                  <div className="text-center">
+                                    <h4 className="text-base font-medium text-gray-900 dark:text-white mb-3">Meal Category</h4>
+                                    {Object.keys(changeMealTypesData).map(category => (
+                                      <div key={category} className="mb-2">
+                                        <span className="inline-block px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-full text-sm font-medium">
+                                          {category}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Meal Types with Checkboxes Column */}
+                              <div>
+                                <div className="space-y-3">
+                                  <div className="grid grid-cols-2 gap-2 text-center">
+                                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Meal Type</h4>
+                                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Select</h4>
+                                  </div>
+
+                                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                                    {Object.entries(changeMealTypesData).map(([category, mealTypes]) =>
+                                      mealTypes.map(mealType => {
+                                        const isCurrentlySelected = (actionData.selectedMealTypes || []).includes(mealType.id)
+                                        const isSelected = (actionData.selectedMealTypes || []).includes(mealType.id)
+                                        return (
+                                          <div key={mealType.id} className="grid grid-cols-2 gap-2 items-center">
+                                            {/* Meal Type Name */}
+                                            <div className={`p-2 rounded-lg border transition-all ${
+                                              isCurrentlySelected
+                                                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600'
+                                                : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
+                                            }`}>
+                                              <div className="flex items-center justify-center">
+                                                <span className={`text-sm font-medium ${
+                                                  isCurrentlySelected
+                                                    ? 'text-blue-900 dark:text-blue-100'
+                                                    : 'text-gray-900 dark:text-white'
+                                                }`}>
+                                                  {mealType.name}
+                                                </span>
+                                                {isCurrentlySelected && (
+                                                  <span className="ml-1 text-xs bg-blue-600 text-white px-1 py-0.5 rounded">
+                                                    Current
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+
+                                            {/* Checkbox */}
+                                            <div className="flex justify-center">
+                                              <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                onChange={(e) => {
+                                                  const currentSelected = actionData.selectedMealTypes || []
+                                                  let newSelected
+                                                  if (e.target.checked) {
+                                                    newSelected = [...currentSelected, mealType.id]
+                                                  } else {
+                                                    newSelected = currentSelected.filter(id => id !== mealType.id)
+                                                  }
+                                                  setActionData(prev => ({ ...prev, selectedMealTypes: newSelected }))
+                                                }}
+                                                className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                                              />
+                                            </div>
+                                          </div>
+                                        )
+                                      })
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Selected meal types summary */}
+                          {!loadingChangeMealTypes && actionData.selectedMealTypes && actionData.selectedMealTypes.length > 0 && (
+                            <div className="mt-4 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                              <p className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                Selected: ({Object.entries(changeMealTypesData).flatMap(([category, mealTypes]) =>
+                                  mealTypes.filter(mt => actionData.selectedMealTypes.includes(mt.id)).map(mt => mt.name)
+                                ).join('_')})
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Notes */}
+                          <div className="mt-4">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Notes
+                            </label>
+                            <textarea
+                              value={actionData.notes || ''}
+                              onChange={(e) => setActionData(prev => ({ ...prev, notes: e.target.value }))}
+                              rows={2}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                              placeholder="Enter any additional notes..."
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Change Delivery Days Form */}
+                  {selectedAction?.type === 'changeDeliveryDays' && (
+                    <div className="space-y-6">
+                      {console.log('📅 Change delivery days form is rendering!', { selectedAction, changeDeliveryDaysData, actionData })}
+
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <div className="p-4">
+                          {/* Show currently selected delivery days */}
+                          {!loadingChangeDeliveryDays && actionData.currentlySelectedDeliveryDays && actionData.currentlySelectedDeliveryDays.length > 0 && (
+                            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                                Currently Selected: {actionData.currentlySelectedDeliveryDays.join(', ')}
+                              </p>
+                              <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                                ({actionData.currentlySelectedDeliveryDays.length} of {changeDeliveryDaysData.length} available delivery days)
+                              </p>
+                            </div>
+                          )}
+
+                          {loadingChangeDeliveryDays ? (
+                            <div className="flex items-center justify-center py-8">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                              <span className="ml-3 text-gray-600 dark:text-gray-400">Loading delivery days...</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-2 text-center">
+                                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Day Name</h4>
+                                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Select</h4>
+                              </div>
+
+                              <div className="space-y-2">
+                                {changeDeliveryDaysData.map(day => {
+                                  const dayName = day.day_name || day.dayName || day.name || day
+                                  const isCurrentlySelected = (actionData.currentlySelectedDeliveryDays || []).includes(dayName)
+                                  const isSelected = (actionData.selectedDeliveryDays || []).includes(dayName)
+                                  return (
+                                    <div key={dayName} className="grid grid-cols-2 gap-2 items-center">
+                                      {/* Day Name */}
+                                      <div className={`p-2 rounded-lg border transition-all ${
+                                        isCurrentlySelected
+                                          ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600'
+                                          : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
+                                      }`}>
+                                        <div className="flex items-center justify-center">
+                                          <span className={`text-sm font-medium ${
+                                            isCurrentlySelected
+                                              ? 'text-blue-900 dark:text-blue-100'
+                                              : 'text-gray-900 dark:text-white'
+                                          }`}>
+                                            {dayName}
+                                          </span>
+                                          {isCurrentlySelected && (
+                                            <span className="ml-1 text-xs bg-blue-600 text-white px-1 py-0.5 rounded">
+                                              Current
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Checkbox */}
+                                      <div className="flex justify-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={(e) => {
+                                            const currentSelected = actionData.selectedDeliveryDays || []
+                                            let newSelected
+                                            if (e.target.checked) {
+                                              newSelected = [...currentSelected, dayName]
+                                            } else {
+                                              newSelected = currentSelected.filter(name => name !== dayName)
+                                            }
+                                            setActionData(prev => ({ ...prev, selectedDeliveryDays: newSelected }))
+                                          }}
+                                          className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                                        />
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Selected delivery days summary */}
+                          {!loadingChangeDeliveryDays && actionData.selectedDeliveryDays && actionData.selectedDeliveryDays.length > 0 && (
+                            <div className="mt-4 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                              <p className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                Selected: ({actionData.selectedDeliveryDays.join(', ')})
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Notes */}
+                          <div className="mt-4">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Notes
+                            </label>
+                            <textarea
+                              value={actionData.notes || ''}
+                              onChange={(e) => setActionData(prev => ({ ...prev, notes: e.target.value }))}
+                              rows={2}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                              placeholder="Enter any additional notes..."
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Change Customer Name Form */}
+                  {selectedAction?.type === 'changeCustomerName' && (
+                    <div className="space-y-6">
+                      {console.log('👤 Change customer name form is rendering!', { selectedAction, subscriptionData, actionData })}
+
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <div className="p-4">
+                          {/* Show current customer name */}
+                          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                            <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                              Current Name: {subscriptionData?.subscriptionHeader?.customerName || 'Not Available'}
+                            </p>
+                          </div>
+
+                          {/* New Customer Name Input */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              New Customer Name
+                            </label>
+                            <input
+                              type="text"
+                              value={actionData.customerName || ''}
+                              onChange={(e) => setActionData(prev => ({ ...prev, customerName: e.target.value }))}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                              placeholder="Enter new customer name..."
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Change Customer Address Form */}
+                  {selectedAction?.type === 'changeAddress' && (
+                    <div className="space-y-6">
+                      {console.log('🏠 Change customer address form is rendering!', { selectedAction, subscriptionData, actionData, changeCustomerAddressData, areas })}
+
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <div className="p-4">
+                          {/* Show current customer addresses */}
+                          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                            <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">Current Addresses:</h4>
+                            {loadingChangeCustomerAddress ? (
+                              <div className="flex items-center gap-2">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                <span className="text-sm text-blue-600 dark:text-blue-300">Loading addresses...</span>
+                              </div>
+                            ) : changeCustomerAddressData.length > 0 ? (
+                              <div className="space-y-2">
+                                {changeCustomerAddressData.map((address, index) => (
+                                  <div key={index} className="text-sm text-blue-700 dark:text-blue-300 bg-white dark:bg-gray-700 p-2 rounded border">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <span className="font-medium">Area ID: {address.areaId}</span>
+                                        {address.isDefault && <span className="ml-2 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs rounded">Default</span>}
+                                      </div>
+                                    </div>
+                                    <div className="mt-1 text-gray-600 dark:text-gray-400">{address.address || 'No address details'}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-blue-600 dark:text-blue-300">No addresses found</span>
+                            )}
+                          </div>
+
+                          {/* Address Form */}
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Branch Selection */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                  Branch
+                                </label>
+                                <select
+                                  value={actionData.branch || ''}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, branch: e.target.value }))}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                >
+                                  <option value="">Select Branch</option>
+                                  {branches.map(branch => (
+                                    <option key={branch.id} value={branch.id}>
+                                      {branch.branchName || branch.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* Area Selection */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                  Area
+                                </label>
+                                <select
+                                  value={actionData.area || ''}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, area: e.target.value }))}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                >
+                                  <option value="">Select Area</option>
+                                  {areas.map(area => (
+                                    <option key={area.id} value={area.id}>
+                                      {area.areaName || area.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Address Details */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Address Details
+                              </label>
+                              <textarea
+                                value={actionData.address || ''}
+                                onChange={(e) => setActionData(prev => ({ ...prev, address: e.target.value }))}
+                                rows={3}
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                placeholder="Enter full address details..."
+                              />
+                            </div>
+
+                            {/* Default Address Checkbox */}
+                            <div className="flex items-center">
+                              <input
+                                type="checkbox"
+                                id="defaultAddress"
+                                checked={actionData.isDefault || false}
+                                onChange={(e) => setActionData(prev => ({ ...prev, isDefault: e.target.checked }))}
+                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                              />
+                              <label htmlFor="defaultAddress" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                                Set as default address
+                              </label>
+                            </div>
+                          </div>
+
+                          {/* Existing Addresses Table */}
+                          {changeCustomerAddressData.length > 0 && (
+                            <div className="mt-6">
+                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Manage Existing Addresses</h4>
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                  <thead className="bg-gray-50 dark:bg-gray-700">
+                                    <tr>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Area Name</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Address</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Default</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Delete</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                    {changeCustomerAddressData.map((address, index) => {
+                                      const areaName = areas.find(area => area.id === address.areaId)?.areaName || areas.find(area => area.id === address.areaId)?.name || `Area ${address.areaId}`
+                                      return (
+                                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                                          <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{areaName}</td>
+                                          <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{address.address || 'No details'}</td>
+                                          <td className="px-4 py-2 text-sm">
+                                            <input
+                                              type="checkbox"
+                                              checked={address.isDefault || false}
+                                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                              disabled
+                                            />
+                                          </td>
+                                          <td className="px-4 py-2 text-sm">
+                                            <button
+                                              type="button"
+                                              className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                                            >
+                                              🗑️
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Change Customer Phone Form */}
+                  {selectedAction?.type === 'changePhone' && (
+                    <div className="space-y-6">
+                      {console.log('📞 Change customer phone form is rendering!', { selectedAction, changeCustomerPhoneData, actionData })}
+
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <div className="p-4">
+                          {loadingChangeCustomerPhone ? (
+                            <div className="flex items-center justify-center py-8">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                              <span className="ml-3 text-gray-600 dark:text-gray-400">Loading phone numbers...</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              {/* Mobile Phone */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                  Mobile
+                                </label>
+                                <input
+                                  type="text"
+                                  value={actionData.mobile || ''}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, mobile: e.target.value }))}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                                  placeholder="Enter mobile number..."
+                                />
+                              </div>
+
+                              {/* Work Phone */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                  Work Phone
+                                </label>
+                                <input
+                                  type="text"
+                                  value={actionData.workPhone || ''}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, workPhone: e.target.value }))}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                                  placeholder="Enter work phone number..."
+                                />
+                              </div>
+
+                              {/* Home Phone */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                  Home Phone
+                                </label>
+                                <input
+                                  type="text"
+                                  value={actionData.homePhone || ''}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, homePhone: e.target.value }))}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                                  placeholder="Enter home phone number..."
+                                />
+                              </div>
+
+                              {/* Other Phone */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                  Other Phone
+                                </label>
+                                <input
+                                  type="text"
+                                  value={actionData.otherPhone || ''}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, otherPhone: e.target.value }))}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+                                  placeholder="Enter other phone number..."
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Placeholder for other actions */}
                   {selectedAction?.type !== 'extendDays' &&
                    selectedAction?.type !== 'activate' &&
@@ -5326,7 +6693,11 @@ const ManageSubscriptions = () => {
                    selectedAction?.type !== 'unrestrict' &&
                    selectedAction?.type !== 'changeStartDate' &&
                    selectedAction?.type !== 'mergeUnmerge' &&
-                   selectedAction?.type !== 'renew' && (
+                   selectedAction?.type !== 'renew' &&
+                   selectedAction?.type !== 'changeMealType' &&
+                   selectedAction?.type !== 'changeDeliveryDays' &&
+                   selectedAction?.type !== 'changeCustomerName' &&
+                   selectedAction?.type !== 'changePhone' && (
                     <div className="space-y-4">
                       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
                         <div className="flex items-center gap-3">
@@ -5363,7 +6734,8 @@ const ManageSubscriptions = () => {
                       (selectedAction?.type === 'unrestrict' && (!actionData.selectedDays || actionData.selectedDays.length === 0)) ||
                       (selectedAction?.type === 'changeStartDate' && !actionData.startDate) ||
                       (selectedAction?.type === 'mergeUnmerge' && selectedRows.length === 0) ||
-                      (selectedAction?.type === 'renew' && (!actionData.startDate || !actionData.duration))
+                      (selectedAction?.type === 'renew' && (!actionData.startDate || !actionData.duration)) ||
+                      (selectedAction?.type === 'changeMealType' && (!actionData.selectedMealTypes || actionData.selectedMealTypes.length === 0))
                     }
                     className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2"
                   >

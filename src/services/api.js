@@ -267,6 +267,14 @@ class ApiService {
     return this.post('/Actions/UpdateCustomerAdress', addressData)
   }
 
+  async checkCustomerAddress(addressId) {
+    return this.get(`/ActionsManager/subscription/${addressId}/Checktb_CustomerAdress`)
+  }
+
+  async submitChangeAddress(customerId, requestBody) {
+    return this.put(`/ActionsManager/subscription/${customerId}/address`, requestBody)
+  }
+
   async updateCustomerPhones(phoneData) {
     return this.post('/Actions/UpdateCustomerPhons', phoneData)
   }
@@ -367,12 +375,12 @@ class ApiService {
 
   async getPaymentTypes(subscriptionType, branchId) {
     const params = {
-      _SubscriptionType: parseInt(subscriptionType)
+      SubscriptionType: parseInt(subscriptionType)
     }
 
-    // Add BranchID as integer if provided
+    // Add branchID as integer if provided
     if (branchId !== null && branchId !== undefined) {
-      params.BranchID = parseInt(branchId)
+      params.branchID = parseInt(branchId)
     }
 
     return this.get('/CreateSubscriptions/GetPaymentType', params)

@@ -470,12 +470,26 @@ const ManageSubscriptions = () => {
   const [changeCustomerAddressData, setChangeCustomerAddressData] = useState([])
   const [loadingChangeCustomerAddress, setLoadingChangeCustomerAddress] = useState(false)
   const [areas, setAreas] = useState([])
+  const [editingAddressIndex, setEditingAddressIndex] = useState(null)
+  const [addressesToDelete, setAddressesToDelete] = useState([])
+  const [newAddresses, setNewAddresses] = useState([])
+  const [showEditAddressDialog, setShowEditAddressDialog] = useState(false)
+  const [editAddressData, setEditAddressData] = useState({
+    address: '',
+    isDefault: false
+  })
 
   // Load branches data
   const loadBranches = async () => {
     try {
-      const response = await apiService.getAllBranches()
-      const branchesData = response?.data || response || []
+      const response = await fetch('http://eg.localhost:7167/api/v1/ActionsManager/branches', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+      const result = await response.json()
+      const branchesData = result?.data || []
       console.log('🏢 Branches loaded:', branchesData)
       setBranches(branchesData)
     } catch (error) {
@@ -599,12 +613,7 @@ const ManageSubscriptions = () => {
         apiService.getMealsTypes(planIdentifier),
         apiService.getDeliveryDays(),
         apiService.getPlanDays(planIdentifier),
-        fetch(`http://eg.localhost:7167/api/v1/CreateSubscriptions/GetPaymentType?SubscriptionType=${subscriptionType}&branch=${branchId}`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }).then(response => response.json())
+        apiService.getPaymentTypes(subscriptionType, branchId)
       ])
 
       console.log('✅ All four API calls completed!')
@@ -669,6 +678,23 @@ const ManageSubscriptions = () => {
 
       console.log('✅ Meal types, delivery days, durations, and payment methods loaded successfully')
 
+      // Pre-populate form with current subscription data after meal types are loaded
+      console.log('🔄 Pre-populating renew form after meal types loaded...')
+      const currentMealTypes = getCurrentSubscriptionMealTypesWithAvailable(transformedMealTypes)
+      const currentDeliveryDays = getCurrentSubscriptionDeliveryDaysWithAvailable(transformedDeliveryDays)
+
+      console.log('🎯 Pre-populating with meal types:', currentMealTypes)
+      console.log('🎯 Pre-populating with delivery days:', currentDeliveryDays)
+
+      setActionData(prev => ({
+        ...prev,
+        mealTypes: currentMealTypes,
+        deliveryDays: currentDeliveryDays,
+        duration: subscriptionData?.subscriptionHeader?.duration || '',
+        subscriptionType: subscriptionData?.subscriptionHeader?.subscriptionType || 0,
+        branchId: subscriptionData?.subscriptionHeader?.branchId || null
+      }))
+
     } catch (error) {
       console.error('❌ Error loading renew form data:', error)
       console.error('❌ Error details:', error.message)
@@ -688,18 +714,7 @@ const ManageSubscriptions = () => {
     try {
       console.log('💳 Loading payment methods for subscriptionType:', subscriptionType, 'branchId:', branchId)
 
-      const response = await fetch(`http://eg.localhost:7167/api/v1/CreateSubscriptions/GetPaymentType?SubscriptionType=${subscriptionType}&branch=${branchId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const paymentMethodsResponse = await response.json()
+      const paymentMethodsResponse = await apiService.getPaymentTypes(subscriptionType, branchId)
       console.log('💳 Payment methods API response:', paymentMethodsResponse)
 
       const paymentMethodsData = paymentMethodsResponse?.data || paymentMethodsResponse || []
@@ -1003,35 +1018,45 @@ const ManageSubscriptions = () => {
     console.log('🏠 Using subscription ID:', currentSubscriptionId)
 
     try {
-      // Load both address data and areas using ActionsManager endpoint
-      console.log('📡 Calling GetCustomerAdress API...')
-      const [addressResponse, areasResponse] = await Promise.all([
+      // Load customer address data and all branches
+      console.log('📡 Calling GetCustomerAdress and branches APIs...')
+      const [addressResponse, branchesResponse] = await Promise.all([
         fetch(`http://eg.localhost:7167/api/v1/ActionsManager/subscription/${customerId}/GetCustomerAdress`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json'
           }
         }),
-        apiService.getAreas()
+        fetch(`http://eg.localhost:7167/api/v1/ActionsManager/branches`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
       ])
 
       if (!addressResponse.ok) {
         throw new Error(`HTTP error getting customer address data! status: ${addressResponse.status}`)
       }
 
+      if (!branchesResponse.ok) {
+        throw new Error(`HTTP error getting branches data! status: ${branchesResponse.status}`)
+      }
+
       const addressData = await addressResponse.json()
+      const branchesData = await branchesResponse.json()
+
       console.log('🏠 Customer address response:', addressData)
+      console.log('🏢 Branches response:', branchesData)
 
       const addressArray = addressData?.data || []
+      const branchesArray = branchesData?.data || []
+
       console.log('🏠 Customer addresses:', addressArray)
-      console.log('🏠 Address array structure:', JSON.stringify(addressArray, null, 2))
+      console.log('🏢 Branches:', branchesArray)
 
       setChangeCustomerAddressData(addressArray)
-
-      // Load areas data
-      const areasData = areasResponse?.data || areasResponse || []
-      console.log('🌍 Areas loaded:', areasData)
-      setAreas(areasData)
+      setBranches(branchesArray)
 
       // Pre-populate form with existing address data
       const addressFormData = {}
@@ -1044,6 +1069,11 @@ const ManageSubscriptions = () => {
         addressFormData.area = defaultAddress.areaId || ''
         addressFormData.address = defaultAddress.address || ''
         addressFormData.isDefault = defaultAddress.isDefault || false
+
+        // If there's a branch ID, load areas for that branch
+        if (defaultAddress.branchId) {
+          loadAreasForBranch(defaultAddress.branchId)
+        }
       }
 
       console.log('🏠 Pre-populated address data:', addressFormData)
@@ -1052,6 +1082,7 @@ const ManageSubscriptions = () => {
     } catch (error) {
       console.error('❌ Error loading customer address data:', error)
       setChangeCustomerAddressData([])
+      setBranches([])
       setAreas([])
       // Fallback to empty address data if API fails
       setActionData(prev => ({
@@ -1064,6 +1095,266 @@ const ManageSubscriptions = () => {
     } finally {
       setLoadingChangeCustomerAddress(false)
     }
+  }
+
+  // Load areas for a specific branch
+  const loadAreasForBranch = async (branchId) => {
+    if (!branchId) {
+      setAreas([])
+      return
+    }
+
+    try {
+      console.log('📡 Loading areas for branch ID:', branchId)
+      const response = await fetch(`http://eg.localhost:7167/api/v1/ActionsManager/areas/${branchId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error getting areas for branch! status: ${response.status}`)
+      }
+
+      const areasData = await response.json()
+      console.log('🌍 Areas for branch response:', areasData)
+
+      const areasArray = areasData?.data || []
+      console.log('🌍 Areas for branch:', areasArray)
+      setAreas(areasArray)
+
+    } catch (error) {
+      console.error('❌ Error loading areas for branch:', error)
+      setAreas([])
+    }
+  }
+
+  // Helper functions for address management
+  const addNewAddress = () => {
+    const { branch, area, address, isDefault } = actionData
+
+    if (!branch || !area || !address.trim()) {
+      alert('Please fill in all required fields (Branch, Area, and Address)')
+      return
+    }
+
+    const branchName = branches.find(b => b.branchID == branch)?.branchName || 'Unknown Branch'
+    const areaName = areas.find(a => a.areaID == area)?.areaName || 'Unknown Area'
+
+    // If this address is being set as default, unset all other addresses
+    if (isDefault) {
+      // Update existing addresses to not be default
+      setChangeCustomerAddressData(prev =>
+        prev.map(addr => ({ ...addr, isDefault: false }))
+      )
+      // Update new addresses to not be default
+      setNewAddresses(prev =>
+        prev.map(addr => ({ ...addr, isDefault: false }))
+      )
+    }
+
+    const newAddress = {
+      id: 0, // New address
+      areaId: parseInt(area),
+      areaName: areaName,
+      branchId: parseInt(branch),
+      branchName: branchName,
+      adress: address.trim(),
+      address: address.trim(), // Keep both for compatibility
+      isDefault: isDefault || false,
+      isNew: true
+    }
+
+    setNewAddresses(prev => [...prev, newAddress])
+
+    // Clear form
+    setActionData(prev => ({
+      ...prev,
+      branch: '',
+      area: '',
+      address: '',
+      isDefault: false
+    }))
+    setAreas([])
+  }
+
+  const editAddress = (index, isExisting = true) => {
+    const addressToEdit = isExisting ? changeCustomerAddressData[index] : newAddresses[index]
+
+    setEditAddressData({
+      address: addressToEdit.adress || addressToEdit.address || '',
+      isDefault: addressToEdit.isDefault || false
+    })
+
+    setEditingAddressIndex(isExisting ? `existing_${index}` : `new_${index}`)
+    setShowEditAddressDialog(true)
+  }
+
+  const updateAddress = () => {
+    const { address, isDefault } = editAddressData
+
+    if (!address.trim()) {
+      alert('Please enter an address')
+      return
+    }
+
+    // If this address is being set as default, unset all other addresses
+    if (isDefault) {
+      // Update existing addresses to not be default
+      setChangeCustomerAddressData(prev =>
+        prev.map(addr => ({ ...addr, isDefault: false }))
+      )
+      // Update new addresses to not be default
+      setNewAddresses(prev =>
+        prev.map(addr => ({ ...addr, isDefault: false }))
+      )
+    }
+
+    if (editingAddressIndex?.startsWith('existing_')) {
+      const index = parseInt(editingAddressIndex.replace('existing_', ''))
+      const updatedAddresses = [...changeCustomerAddressData]
+      updatedAddresses[index] = {
+        ...updatedAddresses[index],
+        adress: address.trim(),
+        address: address.trim(), // Keep both for compatibility
+        isDefault: isDefault || false
+      }
+      setChangeCustomerAddressData(updatedAddresses)
+    } else if (editingAddressIndex?.startsWith('new_')) {
+      const index = parseInt(editingAddressIndex.replace('new_', ''))
+      const updatedAddresses = [...newAddresses]
+      updatedAddresses[index] = {
+        ...updatedAddresses[index],
+        adress: address.trim(),
+        address: address.trim(), // Keep both for compatibility
+        isDefault: isDefault || false
+      }
+      setNewAddresses(updatedAddresses)
+    }
+
+    // Close dialog and clear editing state
+    setShowEditAddressDialog(false)
+    setEditAddressData({
+      address: '',
+      isDefault: false
+    })
+    setEditingAddressIndex(null)
+  }
+
+  const deleteAddress = async (index, isExisting = true) => {
+    if (isExisting) {
+      const addressToDelete = changeCustomerAddressData[index]
+
+      // Check if address can be deleted (only for existing addresses with ID)
+      const subscriptionId = subscriptionData?.subscriptionHeader?.subscriptionId ||
+                           subscriptionData?.subscriptionHeader?.sid ||
+                           subscriptionData?.subscriptionHeader?.id
+
+      if (addressToDelete.id && addressToDelete.id > 0 && subscriptionId) {
+        // Try different possible property names for the delivery address ID
+        const deliveryAddressId = addressToDelete.deliveryAdress ||
+                                 addressToDelete.deliveryAddressId ||
+                                 addressToDelete.addressId ||
+                                 addressToDelete.id
+
+        console.log('🔍 Checking if address can be deleted:', {
+          addressId: addressToDelete.id,
+          deliveryAdress: addressToDelete.deliveryAdress,
+          deliveryAddressId: deliveryAddressId,
+          subscriptionId: subscriptionId,
+          addressToDelete: addressToDelete,
+          availableIds: {
+            subscriptionId: subscriptionData?.subscriptionHeader?.subscriptionId,
+            sid: subscriptionData?.subscriptionHeader?.sid,
+            id: subscriptionData?.subscriptionHeader?.id
+          }
+        })
+
+        try {
+          setIsLoading(true)
+          const response = await apiService.checkCustomerAddress(deliveryAddressId)
+
+          console.log('📡 API Response:', response)
+
+          // If response is false or success is false, address cannot be deleted
+          if (response === false || response.success === false) {
+            showError('This address is currently in use and cannot be deleted.')
+            return
+          }
+        } catch (error) {
+          console.error('❌ Error checking address:', error)
+          showError('Error checking if address can be deleted. Please try again.')
+          return
+        } finally {
+          setIsLoading(false)
+        }
+      } else {
+        console.log('⚠️ Skipping API check - missing data:', {
+          hasId: !!addressToDelete.id,
+          idValue: addressToDelete.id,
+          hasSubscriptionId: !!subscriptionId,
+          subscriptionIdValue: subscriptionId,
+          availableFields: {
+            subscriptionId: subscriptionData?.subscriptionHeader?.subscriptionId,
+            sid: subscriptionData?.subscriptionHeader?.sid,
+            id: subscriptionData?.subscriptionHeader?.id
+          }
+        })
+      }
+
+      // Add to delete list if it has an ID (existing address)
+      if (addressToDelete.id && addressToDelete.id > 0) {
+        setAddressesToDelete(prev => [...prev, addressToDelete.id])
+      }
+
+      // Remove from current list
+      setChangeCustomerAddressData(prev => prev.filter((_, i) => i !== index))
+    } else {
+      // Remove from new addresses list (no validation needed for new addresses)
+      setNewAddresses(prev => prev.filter((_, i) => i !== index))
+    }
+  }
+
+  const cancelEdit = () => {
+    setActionData(prev => ({
+      ...prev,
+      branch: '',
+      area: '',
+      address: '',
+      isDefault: false
+    }))
+    setEditingAddressIndex(null)
+    setAreas([])
+  }
+
+  const cancelEditAddress = () => {
+    setShowEditAddressDialog(false)
+    setEditAddressData({
+      address: '',
+      isDefault: false
+    })
+    setEditingAddressIndex(null)
+  }
+
+  const resetAddressManagement = () => {
+    setChangeCustomerAddressData([])
+    setNewAddresses([])
+    setAddressesToDelete([])
+    setEditingAddressIndex(null)
+    setShowEditAddressDialog(false)
+    setAreas([])
+    setActionData(prev => ({
+      ...prev,
+      branch: '',
+      area: '',
+      address: '',
+      isDefault: false
+    }))
+    setEditAddressData({
+      address: '',
+      isDefault: false
+    })
   }
 
   // Load meal types when renew dialog opens
@@ -2376,6 +2667,258 @@ const ManageSubscriptions = () => {
     document.addEventListener('mouseup', handleMouseUp)
   }
 
+  // Helper functions to get current subscription data
+  const getCurrentSubscriptionMealTypesWithAvailable = (availableMealTypesParam) => {
+    // Try different possible field names for meal types
+    const subscriptionHeader = subscriptionData?.subscriptionHeader
+    if (!subscriptionHeader) return []
+
+    // Check various possible field names
+    const mealTypes = subscriptionHeader.mealTypes ||
+                     subscriptionHeader.MealTypes ||
+                     subscriptionHeader.meal_types ||
+                     []
+
+    console.log('🍽️ Getting current meal types from subscription:', mealTypes)
+    console.log('🔍 Full subscription header:', subscriptionHeader)
+    console.log('🔍 Available meal types for conversion:', availableMealTypesParam)
+
+    // If mealTypes is an array of objects, extract IDs
+    if (Array.isArray(mealTypes) && mealTypes.length > 0) {
+      if (typeof mealTypes[0] === 'object' && mealTypes[0].id) {
+        const extractedIds = mealTypes.map(mt => mt.id)
+        console.log('🍽️ Extracted IDs from meal type objects:', extractedIds)
+        return extractedIds
+      }
+      // If it's already an array of IDs
+      if (typeof mealTypes[0] === 'number') {
+        console.log('🍽️ Using existing meal type IDs:', mealTypes)
+        return mealTypes
+      }
+    }
+
+    // Fallback: extract from subscription details
+    const subscriptionDetails = subscriptionData?.subscriptionDetails || []
+    console.log('🔍 Subscription details count:', subscriptionDetails.length)
+    console.log('🔍 Sample subscription detail:', subscriptionDetails[0])
+
+    // Try to get meal type IDs first, then fall back to meal type names
+    let uniqueMealTypeIds = [...new Set(
+      subscriptionDetails
+        .filter(detail => detail.mealTypeID)
+        .map(detail => detail.mealTypeID)
+    )]
+
+    // If no mealTypeID found, try to get meal type names and convert to IDs
+    if (uniqueMealTypeIds.length === 0) {
+      const uniqueMealTypeNames = [...new Set(
+        subscriptionDetails
+          .filter(detail => detail.mealType || detail.mealTypeName)
+          .map(detail => detail.mealType || detail.mealTypeName)
+      )]
+
+      console.log('🍽️ Found meal type names:', uniqueMealTypeNames)
+
+      // Convert meal type names to IDs using available meal types
+      if (availableMealTypesParam && availableMealTypesParam.length > 0) {
+        uniqueMealTypeIds = uniqueMealTypeNames
+          .map(name => {
+            const mealType = availableMealTypesParam.find(mt =>
+              mt.name?.toLowerCase() === name?.toLowerCase()
+            )
+            console.log(`🔍 Converting "${name}" to ID:`, mealType?.id)
+            return mealType?.id
+          })
+          .filter(id => id !== undefined)
+
+        console.log('🍽️ Converted meal type names to IDs:', uniqueMealTypeIds)
+      } else {
+        console.log('⚠️ No available meal types to convert names to IDs')
+      }
+    }
+
+    console.log('🍽️ Final extracted meal types from subscription details:', uniqueMealTypeIds)
+    return uniqueMealTypeIds
+  }
+
+  const getCurrentSubscriptionMealTypes = () => {
+    // Try different possible field names for meal types
+    const subscriptionHeader = subscriptionData?.subscriptionHeader
+    if (!subscriptionHeader) return []
+
+    // Check various possible field names
+    const mealTypes = subscriptionHeader.mealTypes ||
+                     subscriptionHeader.MealTypes ||
+                     subscriptionHeader.meal_types ||
+                     []
+
+    console.log('🍽️ Getting current meal types from subscription:', mealTypes)
+    console.log('🔍 Full subscription header:', subscriptionHeader)
+    console.log('🔍 Full subscription details sample:', subscriptionData?.subscriptionDetails?.[0])
+
+    // If mealTypes is an array of objects, extract IDs
+    if (Array.isArray(mealTypes) && mealTypes.length > 0) {
+      if (typeof mealTypes[0] === 'object' && mealTypes[0].id) {
+        const extractedIds = mealTypes.map(mt => mt.id)
+        console.log('🍽️ Extracted IDs from meal type objects:', extractedIds)
+        return extractedIds
+      }
+      // If it's already an array of IDs
+      if (typeof mealTypes[0] === 'number') {
+        console.log('🍽️ Using existing meal type IDs:', mealTypes)
+        return mealTypes
+      }
+    }
+
+    // Fallback: extract from subscription details
+    const subscriptionDetails = subscriptionData?.subscriptionDetails || []
+    console.log('🔍 Subscription details count:', subscriptionDetails.length)
+    console.log('🔍 Sample subscription detail:', subscriptionDetails[0])
+
+    // Try to get meal type IDs first, then fall back to meal type names
+    let uniqueMealTypeIds = [...new Set(
+      subscriptionDetails
+        .filter(detail => detail.mealTypeID)
+        .map(detail => detail.mealTypeID)
+    )]
+
+    // If no mealTypeID found, try to get meal type names and convert to IDs
+    if (uniqueMealTypeIds.length === 0) {
+      const uniqueMealTypeNames = [...new Set(
+        subscriptionDetails
+          .filter(detail => detail.mealType || detail.mealTypeName)
+          .map(detail => detail.mealType || detail.mealTypeName)
+      )]
+
+      console.log('🍽️ Found meal type names:', uniqueMealTypeNames)
+
+      // Convert meal type names to IDs using available meal types
+      if (availableMealTypes.length > 0) {
+        uniqueMealTypeIds = uniqueMealTypeNames
+          .map(name => {
+            const mealType = availableMealTypes.find(mt =>
+              mt.name?.toLowerCase() === name?.toLowerCase()
+            )
+            return mealType?.id
+          })
+          .filter(id => id !== undefined)
+
+        console.log('🍽️ Converted meal type names to IDs:', uniqueMealTypeIds)
+      } else {
+        console.log('⚠️ No available meal types to convert names to IDs')
+      }
+    }
+
+    console.log('🍽️ Final extracted meal types from subscription details:', uniqueMealTypeIds)
+    return uniqueMealTypeIds
+  }
+
+  const getCurrentSubscriptionDeliveryDaysWithAvailable = (availableDeliveryDaysParam) => {
+    // Try different possible field names for delivery days
+    const subscriptionHeader = subscriptionData?.subscriptionHeader
+    if (!subscriptionHeader) return []
+
+    const deliveryDays = subscriptionHeader.deliveryDays ||
+                        subscriptionHeader.DeliveryDays ||
+                        subscriptionHeader.delivery_days ||
+                        []
+
+    console.log('📅 Getting current delivery days from subscription:', deliveryDays)
+    console.log('🔍 Available delivery days for conversion:', availableDeliveryDaysParam)
+
+    // If deliveryDays is an array of objects, extract IDs
+    if (Array.isArray(deliveryDays) && deliveryDays.length > 0) {
+      if (typeof deliveryDays[0] === 'object' && deliveryDays[0].id) {
+        const extractedIds = deliveryDays.map(dd => dd.id)
+        console.log('📅 Extracted IDs from delivery day objects:', extractedIds)
+        return extractedIds
+      }
+      // If it's already an array of IDs
+      if (typeof deliveryDays[0] === 'number') {
+        console.log('📅 Using existing delivery day IDs:', deliveryDays)
+        return deliveryDays
+      }
+    }
+
+    // Fallback: extract from subscription details
+    const subscriptionDetails = subscriptionData?.subscriptionDetails || []
+    console.log('🔍 Subscription details count for delivery days:', subscriptionDetails.length)
+
+    // Try to get delivery day IDs first, then fall back to day names
+    let uniqueDeliveryDayIds = [...new Set(
+      subscriptionDetails
+        .filter(detail => detail.deliveryDayID || detail.deliveryDayId)
+        .map(detail => detail.deliveryDayID || detail.deliveryDayId)
+    )]
+
+    // If no deliveryDayID found, try to get day names and convert to IDs
+    if (uniqueDeliveryDayIds.length === 0) {
+      const uniqueDayNames = [...new Set(
+        subscriptionDetails
+          .filter(detail => detail.deliveryDay || detail.dayName)
+          .map(detail => detail.deliveryDay || detail.dayName)
+      )]
+
+      console.log('📅 Found delivery day names:', uniqueDayNames)
+
+      // Convert day names to IDs using available delivery days
+      if (availableDeliveryDaysParam && availableDeliveryDaysParam.length > 0) {
+        uniqueDeliveryDayIds = uniqueDayNames
+          .map(dayName => {
+            const deliveryDay = availableDeliveryDaysParam.find(dd =>
+              dd.name?.toLowerCase() === dayName?.toLowerCase() ||
+              dd.dayName?.toLowerCase() === dayName?.toLowerCase()
+            )
+            console.log(`🔍 Converting "${dayName}" to ID:`, deliveryDay?.id)
+            return deliveryDay?.id
+          })
+          .filter(id => id !== undefined)
+
+        console.log('📅 Converted delivery day names to IDs:', uniqueDeliveryDayIds)
+      } else {
+        console.log('⚠️ No available delivery days to convert names to IDs')
+      }
+    }
+
+    console.log('📅 Final extracted delivery days from subscription details:', uniqueDeliveryDayIds)
+    return uniqueDeliveryDayIds
+  }
+
+  const getCurrentSubscriptionDeliveryDays = () => {
+    // Try different possible field names for delivery days
+    const subscriptionHeader = subscriptionData?.subscriptionHeader
+    if (!subscriptionHeader) return []
+
+    const deliveryDays = subscriptionHeader.deliveryDays ||
+                        subscriptionHeader.DeliveryDays ||
+                        subscriptionHeader.delivery_days ||
+                        []
+
+    console.log('📅 Getting current delivery days from subscription:', deliveryDays)
+
+    // If deliveryDays is an array of objects, extract IDs
+    if (Array.isArray(deliveryDays) && deliveryDays.length > 0) {
+      if (typeof deliveryDays[0] === 'object' && deliveryDays[0].id) {
+        return deliveryDays.map(dd => dd.id)
+      }
+      // If it's already an array of IDs
+      if (typeof deliveryDays[0] === 'number') {
+        return deliveryDays
+      }
+    }
+
+    // Fallback: extract from subscription details
+    const subscriptionDetails = subscriptionData?.subscriptionDetails || []
+    const uniqueDeliveryDays = [...new Set(
+      subscriptionDetails
+        .filter(detail => detail.deliveryDay)
+        .map(detail => detail.deliveryDay)
+    )]
+
+    console.log('📅 Extracted delivery days from subscription details:', uniqueDeliveryDays)
+    return uniqueDeliveryDays
+  }
+
   // Action Handlers
   const handleActionClick = (actionType, actionCategory) => {
     // Handle refund action specially
@@ -2404,9 +2947,16 @@ const ManageSubscriptions = () => {
       loadChangeCustomerAddressData()
     }
 
+    // Handle renew action specially - meal types will be pre-populated after they're loaded
+    if (actionType === 'renew') {
+      console.log('🔄 RENEW ACTION CLICKED - Meal types will be pre-populated after loading...')
+      setActionData({}) // Start with empty data, will be populated after meal types load
+    } else {
+      setActionData({}) // Reset action data for other actions
+    }
+
     setSelectedAction({ type: actionType, category: actionCategory })
     setShowActionDialog(true)
-    setActionData({}) // Reset action data
   }
 
   const handleActionSubmit = async (formData) => {
@@ -3138,7 +3688,10 @@ const ManageSubscriptions = () => {
 
       // Handle Change Customer Address action
       if (selectedAction?.type === 'changeAddress') {
-        console.log('🏠 Processing change customer address action with data:', formData)
+        console.log('🏠 Processing change customer address action')
+        console.log('🏠 Existing addresses:', changeCustomerAddressData)
+        console.log('🏠 New addresses:', newAddresses)
+        console.log('🏠 Addresses to delete:', addressesToDelete)
 
         const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
 
@@ -3147,42 +3700,35 @@ const ManageSubscriptions = () => {
           return
         }
 
-        // Prepare addresses array - include all addresses with proper structure
+        // Prepare addresses array - combine existing (modified) and new addresses
         const customerAddresses = []
 
-        // Helper function to find existing address ID
-        const findAddressId = (addressData) => {
-          const existingAddress = changeCustomerAddressData.find(addr =>
-            addr.areaId === addressData.areaId || addr.address === addressData.address
-          )
-          return existingAddress?.id || 0
-        }
-
-        // Add the address from form data
-        if (formData.area && formData.address) {
-          customerAddresses.push({
-            id: findAddressId({ areaId: formData.area, address: formData.address }),
-            areaId: parseInt(formData.area) || 0,
-            address: formData.address.trim(),
-            isDefault: formData.isDefault || false
-          })
-        }
-
-        // Add existing addresses that weren't modified
+        // Add all existing addresses (these may have been modified)
         changeCustomerAddressData.forEach(existingAddr => {
-          const isModified = customerAddresses.some(newAddr =>
-            newAddr.id === existingAddr.id ||
-            (newAddr.areaId === existingAddr.areaId && newAddr.address === existingAddr.address)
-          )
+          customerAddresses.push({
+            id: existingAddr.id || 0,
+            areaId: existingAddr.areaId || 0,
+            adress: existingAddr.adress || existingAddr.address || "",
+            defaultAdress: Boolean(existingAddr.isDefault || existingAddr.defaultAdress),
+            customerID: customerId || 0,
+            branchID: existingAddr.branchID || 0,
+            driverID: existingAddr.driverID || 0,
+            areaName: existingAddr.areaName || ""
+          })
+        })
 
-          if (!isModified) {
-            customerAddresses.push({
-              id: existingAddr.id,
-              areaId: existingAddr.areaId,
-              address: existingAddr.address || "",
-              isDefault: existingAddr.isDefault || false
-            })
-          }
+        // Add all new addresses (with id: 0 to indicate they're new)
+        newAddresses.forEach(newAddr => {
+          customerAddresses.push({
+            id: 0, // New address
+            areaId: newAddr.areaId || 0,
+            adress: newAddr.adress || newAddr.address || "",
+            defaultAdress: Boolean(newAddr.isDefault || newAddr.defaultAdress),
+            customerID: customerId || 0,
+            branchID: newAddr.branchID || 0,
+            driverID: newAddr.driverID || 0,
+            areaName: newAddr.areaName || ""
+          })
         })
 
         if (customerAddresses.length === 0) {
@@ -3190,39 +3736,37 @@ const ManageSubscriptions = () => {
           return
         }
 
+        // Ensure only one default address - find the last one marked as default and unset others
+        let defaultFound = false
+        for (let i = customerAddresses.length - 1; i >= 0; i--) {
+          if (customerAddresses[i].defaultAdress && !defaultFound) {
+            // Keep this as the default
+            defaultFound = true
+          } else {
+            // Unset default for all others
+            customerAddresses[i].defaultAdress = false
+          }
+        }
+
         // Prepare request body according to the API specification
         const requestBody = {
-          customerAddresses: customerAddresses,
+          Addresses: customerAddresses,
           sid: subscriptionId
         }
 
         console.log('📤 Change customer address request body:', JSON.stringify(requestBody, null, 2))
         console.log('📤 Customer addresses array:', customerAddresses)
         console.log('📤 Change customer address data state:', changeCustomerAddressData)
-        console.log('📡 API URL:', `/api/v1/ActionsManager/customer/${customerId}/addresses`)
+        console.log('📡 API URL:', `/ActionsManager/subscription/${customerId}/address`)
         console.log('📡 Customer ID:', customerId)
 
-        const response = await makeApiCall(`/api/v1/ActionsManager/customer/${customerId}/addresses`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify(requestBody)
-        })
-
-        console.log('📡 Change customer address response status:', response.status)
-
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error('❌ API Error Response:', errorText)
-          throw new Error(`Failed to change customer address: ${response.status} - ${errorText}`)
-        }
-
-        const result = await response.json()
+        const result = await apiService.submitChangeAddress(customerId, requestBody)
         console.log('✅ Change customer address result:', result)
 
         success('Customer address changed successfully!')
+
+        // Reset address management state
+        resetAddressManagement()
 
         // Refresh subscription data
         console.log('🔄 Refreshing subscription data by simulating SID search...')
@@ -3246,6 +3790,11 @@ const ManageSubscriptions = () => {
     setShowActionDialog(false)
     setSelectedAction(null)
     setActionData({})
+
+    // Reset address management state if it was a change address action
+    if (selectedAction?.type === 'changeAddress') {
+      resetAddressManagement()
+    }
   }
 
   // Fetch tab data when tab is selected
@@ -4170,20 +4719,7 @@ const ManageSubscriptions = () => {
                         <Phone className="h-4 w-4" />
                         Change Phone
                       </button>
-                      <button
-                        onClick={() => handleActionClick('changeDayStatus', 'global')}
-                        className="w-full text-left px-3 py-2 text-sm bg-violet-50 hover:bg-violet-100 dark:bg-violet-900/20 dark:hover:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
-                      >
-                        <ToggleLeft className="h-4 w-4" />
-                        Change Day Status
-                      </button>
-                      <button
-                        onClick={() => handleActionClick('deleteDays', 'global')}
-                        className="w-full text-left px-3 py-2 text-sm bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Delete Days
-                      </button>
+
                     </div>
                   </div>
 
@@ -5625,7 +6161,7 @@ const ManageSubscriptions = () => {
                               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                 {availableMealTypes.length > 0 ? availableMealTypes.map(mealType => {
                                   // Get current subscription meal types (IDs) or use actionData if modified
-                                  const currentSubscriptionMealIds = subscriptionData?.subscriptionHeader?.mealTypes || []
+                                  const currentSubscriptionMealIds = getCurrentSubscriptionMealTypes()
                                   const selectedMealIds = actionData.mealTypes || currentSubscriptionMealIds
                                   const isChecked = selectedMealIds.includes(mealType.id)
 
@@ -5716,7 +6252,7 @@ const ManageSubscriptions = () => {
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 {availableDeliveryDays.length > 0 ? availableDeliveryDays.map(deliveryDay => {
                                   // Get current subscription delivery days (IDs) or use actionData if modified
-                                  const currentSubscriptionDayIds = subscriptionData?.subscriptionHeader?.deliveryDays || []
+                                  const currentSubscriptionDayIds = getCurrentSubscriptionDeliveryDays()
                                   const selectedDayIds = actionData.deliveryDays || currentSubscriptionDayIds
                                   const isChecked = selectedDayIds.includes(deliveryDay.day_id || deliveryDay.id)
 
@@ -5860,32 +6396,7 @@ const ManageSubscriptions = () => {
                         </div>
 
                         <div className="p-4">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Payment Method */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                                Payment Method {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
-                              </label>
-                              {loadingRenewData ? (
-                                <div className="flex items-center justify-center py-8">
-                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                                </div>
-                              ) : (
-                                <select
-                                  value={actionData.paymentMethod !== undefined ? actionData.paymentMethod : (subscriptionData?.subscriptionHeader?.paymentMethod || '')}
-                                  onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
-                                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                                >
-                                  <option value="">Select payment method...</option>
-                                  {availablePaymentTypes.map((paymentType) => (
-                                    <option key={paymentType.paymentID || paymentType.id} value={paymentType.paymentID || paymentType.id}>
-                                      {paymentType.paymentName || paymentType.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                            </div>
-
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             {/* Subscription From */}
                             <div>
                               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -5911,6 +6422,45 @@ const ManageSubscriptions = () => {
                                 <option value={1}>Mobile Application</option>
                                 <option value={2}>Branch</option>
                               </select>
+                            </div>
+
+                            {/* Payment Method */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                Payment Method {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                              </label>
+                              {loadingRenewData ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                </div>
+                              ) : (
+                                <select
+                                  value={actionData.paymentMethod !== undefined ? actionData.paymentMethod : (subscriptionData?.subscriptionHeader?.paymentMethod || '')}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                >
+                                  <option value="">Select payment method...</option>
+                                  {availablePaymentTypes.map((paymentType) => (
+                                    <option key={paymentType.paymentID || paymentType.id} value={paymentType.paymentID || paymentType.id}>
+                                      {paymentType.paymentName || paymentType.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+
+                            {/* Reference ID */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                Reference ID
+                              </label>
+                              <input
+                                type="text"
+                                value={actionData.referenceId || ''}
+                                onChange={(e) => setActionData(prev => ({ ...prev, referenceId: e.target.value }))}
+                                placeholder="Enter reference ID..."
+                                className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 shadow-sm"
+                              />
                             </div>
                           </div>
 
@@ -6081,7 +6631,7 @@ const ManageSubscriptions = () => {
                                   <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Plan Amount</span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                      ${(actionData.total !== undefined && actionData.total !== '' ? actionData.total : (planPriceData.planAmount || 0)).toFixed(2)}
+                                      ${(planPriceData.planAmount || 0).toFixed(2)}
                                     </span>
                                   </div>
 
@@ -6090,7 +6640,7 @@ const ManageSubscriptions = () => {
                                       Tax ({((planPriceData.taxRate || 0) * 100).toFixed(1)}%)
                                     </span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                      ${(actionData.taxAmount !== undefined && actionData.taxAmount !== '' ? actionData.taxAmount : (planPriceData.taxAmount || 0)).toFixed(2)}
+                                      ${(planPriceData.taxAmount || 0).toFixed(2)}
                                     </span>
                                   </div>
 
@@ -6122,7 +6672,15 @@ const ManageSubscriptions = () => {
                                     <div className="flex justify-between items-center">
                                       <span className="text-lg font-semibold text-gray-900 dark:text-white">Total Amount</span>
                                       <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                                        ${(actionData.total || subscriptionData?.subscriptionHeader?.totalPrice || 0).toFixed(2)}
+                                        ${(() => {
+                                          const planAmount = planPriceData.planAmount || 0
+                                          const taxAmount = planPriceData.taxAmount || 0
+                                          const deliveryFees = planPriceData.deliveryFees || 0
+                                          const bagValue = actionData.bagValue || 0
+                                          const manualDiscount = actionData.manualDiscount || 0
+                                          const calculatedTotal = planAmount + taxAmount + deliveryFees + bagValue - manualDiscount
+                                          return (actionData.total !== undefined && actionData.total !== '' ? actionData.total : calculatedTotal).toFixed(2)
+                                        })()}
                                       </span>
                                     </div>
                                   </div>
@@ -6475,18 +7033,21 @@ const ManageSubscriptions = () => {
                             {/* Form Header */}
                             <div className="flex items-center justify-between">
                               <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                {changeCustomerAddressData.length > 0 ? 'Update Address' : 'Add New Address'}
+                                Add New Address
                               </h4>
-                              {changeCustomerAddressData.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => setActionData(prev => ({ ...prev, branch: '', area: '', address: '', isDefault: false }))}
-                                  className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                                >
-                                  Clear Form
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActionData(prev => ({ ...prev, branch: '', area: '', address: '', isDefault: false }))
+                                  setAreas([])
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                              >
+                                Clear Form
+                              </button>
                             </div>
+
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               {/* Branch Selection */}
                               <div>
@@ -6495,13 +7056,26 @@ const ManageSubscriptions = () => {
                                 </label>
                                 <select
                                   value={actionData.branch || ''}
-                                  onChange={(e) => setActionData(prev => ({ ...prev, branch: e.target.value }))}
+                                  onChange={(e) => {
+                                    const branchId = e.target.value
+                                    setActionData(prev => ({
+                                      ...prev,
+                                      branch: branchId,
+                                      area: '' // Clear area when branch changes
+                                    }))
+                                    // Load areas for the selected branch
+                                    if (branchId) {
+                                      loadAreasForBranch(branchId)
+                                    } else {
+                                      setAreas([])
+                                    }
+                                  }}
                                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                                 >
                                   <option value="">Select Branch</option>
                                   {branches.map(branch => (
-                                    <option key={branch.id} value={branch.id}>
-                                      {branch.branchName || branch.name}
+                                    <option key={branch.branchID} value={branch.branchID}>
+                                      {branch.branchName}
                                     </option>
                                   ))}
                                 </select>
@@ -6516,11 +7090,14 @@ const ManageSubscriptions = () => {
                                   value={actionData.area || ''}
                                   onChange={(e) => setActionData(prev => ({ ...prev, area: e.target.value }))}
                                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                  disabled={!actionData.branch}
                                 >
-                                  <option value="">Select Area</option>
+                                  <option value="">
+                                    {!actionData.branch ? 'Select Branch First' : 'Select Area'}
+                                  </option>
                                   {areas.map(area => (
-                                    <option key={area.id} value={area.id}>
-                                      {area.areaName || area.name}
+                                    <option key={area.areaID} value={area.areaID}>
+                                      {area.areaName}
                                     </option>
                                   ))}
                                 </select>
@@ -6547,19 +7124,46 @@ const ManageSubscriptions = () => {
                                 type="checkbox"
                                 id="defaultAddress"
                                 checked={actionData.isDefault || false}
-                                onChange={(e) => setActionData(prev => ({ ...prev, isDefault: e.target.checked }))}
-                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                onChange={(e) => {
+                                  const isChecked = e.target.checked
+                                  setActionData(prev => ({ ...prev, isDefault: isChecked }))
+
+                                  // If setting this as default, unset all other addresses
+                                  if (isChecked) {
+                                    // Update existing addresses to not be default
+                                    setChangeCustomerAddressData(prev =>
+                                      prev.map(addr => ({ ...addr, isDefault: false, defaultAdress: false }))
+                                    )
+                                    // Update new addresses to not be default
+                                    setNewAddresses(prev =>
+                                      prev.map(addr => ({ ...addr, isDefault: false, defaultAdress: false }))
+                                    )
+                                  }
+                                }}
+                                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded accent-green-600"
                               />
                               <label htmlFor="defaultAddress" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
                                 Set as default address
                               </label>
                             </div>
+
+                            {/* Add Address Button */}
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={addNewAddress}
+                                disabled={!actionData.branch || !actionData.area || !actionData.address?.trim()}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                              >
+                                Add Address
+                              </button>
+                            </div>
                           </div>
 
-                          {/* Existing Addresses Table */}
-                          {changeCustomerAddressData.length > 0 && (
+                          {/* Addresses Management Table */}
+                          {(changeCustomerAddressData.length > 0 || newAddresses.length > 0) && (
                             <div className="mt-6">
-                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Manage Existing Addresses</h4>
+                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Manage Addresses</h4>
                               <div className="overflow-x-auto">
                                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                   <thead className="bg-gray-50 dark:bg-gray-700">
@@ -6567,35 +7171,92 @@ const ManageSubscriptions = () => {
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Area Name</th>
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Address</th>
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Default</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Edit</th>
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Delete</th>
                                     </tr>
                                   </thead>
                                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                    {changeCustomerAddressData.map((address, index) => {
-                                      const areaName = areas.find(area => area.id === address.areaId)?.areaName || areas.find(area => area.id === address.areaId)?.name || `Area ${address.areaId}`
-                                      return (
-                                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                                          <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{areaName}</td>
-                                          <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{address.address || 'No details'}</td>
-                                          <td className="px-4 py-2 text-sm">
-                                            <input
-                                              type="checkbox"
-                                              checked={address.isDefault || false}
-                                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                                              disabled
-                                            />
-                                          </td>
-                                          <td className="px-4 py-2 text-sm">
-                                            <button
-                                              type="button"
-                                              className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                                            >
-                                              🗑️
-                                            </button>
-                                          </td>
-                                        </tr>
-                                      )
-                                    })}
+                                    {/* Existing Addresses */}
+                                    {changeCustomerAddressData.map((address, index) => (
+                                      <tr key={`existing_${index}`} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{address.areaName || 'Unknown Area'}</td>
+                                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{address.adress || address.address || 'No details'}</td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <div className="flex justify-center">
+                                            {(address.isDefault || address.defaultAdress) ? (
+                                              <div className="h-5 w-5 bg-green-600 border-2 border-green-600 rounded flex items-center justify-center">
+                                                <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                              </div>
+                                            ) : (
+                                              <div className="h-5 w-5 border-2 border-gray-400 rounded bg-transparent"></div>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <button
+                                            type="button"
+                                            onClick={() => editAddress(index, true)}
+                                            className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                                            title="Edit Address"
+                                          >
+                                            ✏️
+                                          </button>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <button
+                                            type="button"
+                                            onClick={() => deleteAddress(index, true)}
+                                            className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                                            title="Delete Address"
+                                          >
+                                            🗑️
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+
+                                    {/* New Addresses */}
+                                    {newAddresses.map((address, index) => (
+                                      <tr key={`new_${index}`} className="hover:bg-gray-50 dark:hover:bg-gray-700 bg-blue-50 dark:bg-blue-900/20">
+                                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{address.areaName || 'New Area'}</td>
+                                        <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{address.address}</td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <div className="flex justify-center">
+                                            {(address.isDefault || address.defaultAdress) ? (
+                                              <div className="h-5 w-5 bg-green-600 border-2 border-green-600 rounded flex items-center justify-center">
+                                                <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                              </div>
+                                            ) : (
+                                              <div className="h-5 w-5 border-2 border-gray-400 rounded bg-transparent"></div>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <button
+                                            type="button"
+                                            onClick={() => editAddress(index, false)}
+                                            className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                                            title="Edit Address"
+                                          >
+                                            ✏️
+                                          </button>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <button
+                                            type="button"
+                                            onClick={() => deleteAddress(index, false)}
+                                            className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                                            title="Delete Address"
+                                          >
+                                            🗑️
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
                                   </tbody>
                                 </table>
                               </div>
@@ -6603,6 +7264,92 @@ const ManageSubscriptions = () => {
                           )}
                         </div>
                       </div>
+
+                      {/* Edit Address Dialog */}
+                      {showEditAddressDialog && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
+                            <div className="p-6">
+                              <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                                  Edit Address
+                                </h3>
+                                <button
+                                  type="button"
+                                  onClick={cancelEditAddress}
+                                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+
+                              <div className="space-y-4">
+                                {/* Address Details */}
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Address Details
+                                  </label>
+                                  <textarea
+                                    value={editAddressData.address || ''}
+                                    onChange={(e) => setEditAddressData(prev => ({ ...prev, address: e.target.value }))}
+                                    rows={3}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                    placeholder="Enter full address details..."
+                                  />
+                                </div>
+
+                                {/* Default Address Checkbox */}
+                                <div className="flex items-center">
+                                  <input
+                                    type="checkbox"
+                                    id="editDefaultAddress"
+                                    checked={editAddressData.isDefault || false}
+                                    onChange={(e) => {
+                                      const isChecked = e.target.checked
+                                      setEditAddressData(prev => ({ ...prev, isDefault: isChecked }))
+
+                                      // If setting this as default, unset all other addresses
+                                      if (isChecked) {
+                                        // Update existing addresses to not be default
+                                        setChangeCustomerAddressData(prev =>
+                                          prev.map(addr => ({ ...addr, isDefault: false, defaultAdress: false }))
+                                        )
+                                        // Update new addresses to not be default
+                                        setNewAddresses(prev =>
+                                          prev.map(addr => ({ ...addr, isDefault: false, defaultAdress: false }))
+                                        )
+                                      }
+                                    }}
+                                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded accent-green-600"
+                                  />
+                                  <label htmlFor="editDefaultAddress" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                                    Set as default address
+                                  </label>
+                                </div>
+                              </div>
+
+                              {/* Dialog Actions */}
+                              <div className="flex justify-end gap-3 mt-6">
+                                <button
+                                  type="button"
+                                  onClick={cancelEditAddress}
+                                  className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={updateAddress}
+                                  disabled={!editAddressData.address?.trim()}
+                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  Update Address
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

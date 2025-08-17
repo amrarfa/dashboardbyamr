@@ -469,33 +469,45 @@ const BillingPaymentStep = ({ onNext, onPrevious, currentStep, totalSteps }) => 
             const allMealTypes = mealTypesResponse?.data || mealTypesResponse || []
 
             // Transform and filter selected meal types
+            console.log('🔍 Selected meal type IDs:', formData.mealTypes)
+            console.log('🔍 Available meal types from API:', allMealTypes)
+
             mealTypesArray = formData.mealTypes.map(mealTypeId => {
               const mealType = allMealTypes.find(mt => mt.mealTypeID === mealTypeId)
+              console.log(`🔍 Looking for meal type ID ${mealTypeId}, found:`, mealType)
+
               if (mealType) {
-                return {
+                const result = {
                   mealTypeID: mealType.mealTypeID,
                   mealTypeName: mealType.mealTypeName,
                   mealTypeCategoryID: mealType.mealTypeCategoryID,
                   mealTypeCategoryName: mealType.mealTypeCategoryName
                 }
+                console.log('✅ Successfully mapped meal type:', result)
+                return result
               } else {
                 console.warn('⚠️ Meal type not found for ID:', mealTypeId)
-                return {
+                console.warn('⚠️ Available meal type IDs:', allMealTypes.map(mt => mt.mealTypeID))
+                const fallback = {
                   mealTypeID: mealTypeId,
                   mealTypeName: `MealType ${mealTypeId}`,
-                  mealTypeCategoryID: 0,
-                  mealTypeCategoryName: 'Unknown Category'
+                  mealTypeCategoryID: 1,
+                  mealTypeCategoryName: 'Meal'
                 }
+                console.warn('⚠️ Using fallback meal type:', fallback)
+                return fallback
               }
             })
+
+            console.log('🔍 Final meal types array:', mealTypesArray)
           } catch (error) {
             console.error('❌ Error fetching meal types:', error)
             // Fallback: create basic objects from IDs
             mealTypesArray = formData.mealTypes.map(mealTypeId => ({
               mealTypeID: mealTypeId,
               mealTypeName: `MealType ${mealTypeId}`,
-              mealTypeCategoryID: 0,
-              mealTypeCategoryName: 'Unknown Category'
+              mealTypeCategoryID: 1,
+              mealTypeCategoryName: 'Meal'
             }))
           }
         } else {

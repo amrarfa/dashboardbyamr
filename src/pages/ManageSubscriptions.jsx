@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Search,
@@ -271,32 +271,95 @@ const ManageSubscriptions = () => {
       setLoadingPlanPrice(true)
       console.log('🔄 Calling GetPlanPrice API...', { customerId, planId, duration, mealTypes, deliveryDays })
 
+      // Create new AbortController for this request
+      currentAbortController.current = new AbortController()
+
       // Convert selected meal type IDs to full meal type objects
+      console.log('🔍 GetPlanPrice - Selected meal type IDs:', mealTypes)
+      console.log('🔍 GetPlanPrice - Available meal types:', availableMealTypes)
+
       const mealTypesArray = mealTypes.map(mealTypeId => {
         const mealType = availableMealTypes.find(mt => mt.id === parseInt(mealTypeId))
+        console.log(`🔍 GetPlanPrice - Looking for meal type ID ${mealTypeId}, found:`, mealType)
+
         if (mealType) {
-          return {
+          const result = {
             mealTypeCategoryID: mealType.categoryId,
             mealTypeCategoryName: mealType.categoryName,
             mealTypeID: mealType.id,
             mealTypeName: mealType.name
           }
+          console.log('✅ GetPlanPrice - Successfully mapped meal type:', result)
+          return result
         } else {
           // Fallback if meal type not found in available list
-          return {
-            mealTypeCategoryID: 0,
-            mealTypeCategoryName: "Unknown Category",
+          console.warn('⚠️ GetPlanPrice - Meal type not found for ID:', mealTypeId)
+          console.warn('⚠️ GetPlanPrice - Available meal type IDs:', availableMealTypes.map(mt => mt.id))
+          const fallback = {
+            mealTypeCategoryID: 1,
+            mealTypeCategoryName: "Meal",
             mealTypeID: parseInt(mealTypeId),
             mealTypeName: `MealType ${mealTypeId}`
           }
+          console.warn('⚠️ GetPlanPrice - Using fallback meal type:', fallback)
+          return fallback
         }
       })
+
+      console.log('🔍 GetPlanPrice - Final meal types array:', mealTypesArray)
+
+      // Convert selected delivery day IDs to full delivery day objects
+      console.log('🔍 GetPlanPrice - Selected delivery day IDs:', deliveryDays)
+      console.log('🔍 GetPlanPrice - Available delivery days:', availableDeliveryDays)
+      console.log('🔍 GetPlanPrice - Available delivery days structure:', availableDeliveryDays.map(dd => ({
+        id: dd.id,
+        day_id: dd.day_id,
+        name: dd.name,
+        day_name: dd.day_name
+      })))
+      console.log('🔍 GetPlanPrice - Available delivery day IDs only:', availableDeliveryDays.map(dd => dd.day_id))
+
+      const deliveryDaysArray = deliveryDays.map(dayId => {
+        console.log(`🔍 GetPlanPrice - Processing delivery day ID: ${dayId} (type: ${typeof dayId})`)
+        console.log(`🔍 GetPlanPrice - Searching for day ID ${dayId} in available days:`, availableDeliveryDays.map(dd => dd.day_id))
+
+        const deliveryDay = availableDeliveryDays.find(dd => {
+          const match = dd.day_id === parseInt(dayId) || dd.day_id === dayId
+          console.log(`🔍 GetPlanPrice - Checking delivery day: day_id=${dd.day_id}, day_name="${dd.day_name}", searchId=${dayId}, match=${match}`)
+          return match
+        })
+        console.log(`🔍 GetPlanPrice - Looking for delivery day ID ${dayId}, found:`, deliveryDay)
+
+        if (deliveryDay) {
+          const result = {
+            day_id: deliveryDay.day_id,
+            day_name: deliveryDay.day_name,
+            show: true
+          }
+          console.log('✅ GetPlanPrice - Successfully mapped delivery day:', result)
+          return result
+        } else {
+          // Fallback if delivery day not found in available list
+          console.warn('⚠️ GetPlanPrice - Delivery day not found for ID:', dayId)
+          console.warn('⚠️ GetPlanPrice - Available delivery day IDs:', availableDeliveryDays.map(dd => dd.day_id))
+          const fallback = {
+            day_id: parseInt(dayId) || 1,
+            day_name: "Monday",
+            show: true
+          }
+          console.warn('⚠️ GetPlanPrice - Using fallback delivery day:', fallback)
+          return fallback
+        }
+      })
+
+      console.log('🔍 GetPlanPrice - Final delivery days array:', deliveryDaysArray)
 
       const requestBody = {
         customerId: parseInt(customerId),
         planId: parseInt(planId),
         duration: parseInt(duration),
         mealsType: mealTypesArray, // Note: API expects "mealsType" not "mealTypes"
+        deliveryDays: deliveryDaysArray, // Add delivery days to the request
         isContainBag: false,
         giftCode: actionData.giftCode || ""
       }
@@ -308,7 +371,8 @@ const ManageSubscriptions = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
+        signal: currentAbortController.current.signal
       })
 
       if (response.ok) {
@@ -333,6 +397,11 @@ const ManageSubscriptions = () => {
         showError(`Failed to get plan price: ${errorData.message || 'Unknown error'}`)
       }
     } catch (error) {
+      // Don't show error if request was cancelled
+      if (error.name === 'AbortError') {
+        console.log('🚫 GetPlanPrice request was cancelled')
+        return
+      }
       console.error('❌ GetPlanPrice Error:', error)
       showError('Failed to get plan price')
     } finally {
@@ -340,59 +409,106 @@ const ManageSubscriptions = () => {
     }
   }
 
-  // Auto-update tax amount when API returns new data (but allow user to override)
+  // Auto-update tax amount when API returns new data
   useEffect(() => {
-    // Only update tax amount if user hasn't manually set it and API has data
+    // Update tax amount when API returns new data, unless user has manually modified it
     if (Object.keys(planPriceData).length > 0 && planPriceData.taxAmount !== undefined) {
-      if (!actionData.taxAmount || actionData.taxAmount === 0) {
-        console.log('🔄 Auto-updating tax amount from API:', planPriceData.taxAmount)
-        setActionData(prev => ({ ...prev, taxAmount: planPriceData.taxAmount }))
+      // Always update from API unless user has explicitly set a different value
+      console.log('🔄 Auto-updating tax amount from API:', planPriceData.taxAmount)
+      setActionData(prev => ({
+        ...prev,
+        taxAmount: planPriceData.taxAmount,
+        // Mark that this was auto-updated, not user-modified
+        _taxAmountAutoUpdated: true
+      }))
+    }
+  }, [planPriceData.taxAmount])
+
+  // Auto-update total when API returns new data
+  useEffect(() => {
+    if (Object.keys(planPriceData).length > 0 && planPriceData.planAmount !== undefined) {
+      // Use the planAmount directly from API response
+      console.log('🔄 Auto-updating total from API planAmount:', planPriceData.planAmount)
+      setActionData(prev => ({
+        ...prev,
+        total: planPriceData.planAmount,
+        // Mark that this was auto-updated, not user-modified
+        _totalAutoUpdated: true
+      }))
+    }
+  }, [planPriceData.planAmount])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Cancel any pending debounced calls
+      if (debouncedPlanPriceUpdate.current) {
+        clearTimeout(debouncedPlanPriceUpdate.current)
+      }
+      // Cancel any ongoing API requests
+      if (currentAbortController.current) {
+        currentAbortController.current.abort()
       }
     }
-  }, [planPriceData.taxAmount, planPriceData])
+  }, [])
 
-  // Auto-update total when API returns new data (but allow user to override)
-  useEffect(() => {
-    const planAmount = planPriceData.planAmount || 0
-    const taxAmount = actionData.taxAmount || planPriceData.taxAmount || 0
-    const deliveryFees = planPriceData.deliveryFees || 0
-    const bagValue = actionData.bagValue || 0
-    const manualDiscount = actionData.manualDiscount || 0
-    const calculatedTotal = planAmount + taxAmount + deliveryFees + bagValue - manualDiscount
+  // Debounced plan price update to prevent multiple API calls
+  const debouncedPlanPriceUpdate = useRef(null)
+  const currentAbortController = useRef(null)
 
-    // Only auto-update total if user hasn't manually set it and API has meaningful data
-    if (Object.keys(planPriceData).length > 0 && (!actionData.total || actionData.total === 0)) {
-      console.log('🔄 Auto-updating total from API calculation:', calculatedTotal)
-      setActionData(prev => ({ ...prev, total: calculatedTotal }))
-    }
-  }, [planPriceData.planAmount, planPriceData.taxAmount, planPriceData.deliveryFees, actionData.bagValue, actionData.manualDiscount, planPriceData])
-
-  // Helper function to trigger plan price calculation
+  // Helper function to trigger plan price calculation with debouncing
   const triggerPlanPriceUpdate = (newActionData) => {
     console.log('🔄 triggerPlanPriceUpdate called with:', newActionData)
 
-    // Get required parameters - try different field names for planId
-    const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
-    const planId = subscriptionData?.subscriptionHeader?.planId ||
-                   subscriptionData?.subscriptionHeader?.planID ||
-                   subscriptionData?.subscriptionHeader?.plan_id ||
-                   subscriptionData?.subscriptionHeader?.id
-    const duration = newActionData.duration || subscriptionData?.subscriptionHeader?.duration
-    const mealTypes = newActionData.mealTypes || subscriptionData?.subscriptionHeader?.mealTypes || []
-    const deliveryDays = newActionData.deliveryDays || subscriptionData?.subscriptionHeader?.deliveryDays || []
+    // Cancel previous debounced call
+    if (debouncedPlanPriceUpdate.current) {
+      clearTimeout(debouncedPlanPriceUpdate.current)
+      console.log('🚫 Cancelled previous debounced call')
+    }
 
-    console.log('📊 Parameters for API call:', {
-      customerId,
-      planId,
-      duration,
-      mealTypes,
-      deliveryDays,
-      subscriptionHeader: subscriptionData?.subscriptionHeader,
-      availableFields: Object.keys(subscriptionData?.subscriptionHeader || {})
-    })
+    // Cancel previous API request
+    if (currentAbortController.current) {
+      currentAbortController.current.abort()
+      console.log('🚫 Cancelled previous API request')
+    }
 
-    // Call API with validation
-    getPlanPrice(customerId, planId, duration, mealTypes, deliveryDays)
+    // Debounce the API call by 500ms
+    debouncedPlanPriceUpdate.current = setTimeout(() => {
+      console.log('⏰ Debounced API call executing after 500ms delay')
+
+      // Get required parameters - try different field names for planId
+      const customerId = subscriptionData?.subscriptionHeader?.customerId || subscriptionData?.subscriptionHeader?.customerID
+      const planId = subscriptionData?.subscriptionHeader?.planId ||
+                     subscriptionData?.subscriptionHeader?.planID ||
+                     subscriptionData?.subscriptionHeader?.plan_id ||
+                     subscriptionData?.subscriptionHeader?.id
+      const duration = newActionData.duration || subscriptionData?.subscriptionHeader?.duration
+      const mealTypes = newActionData.mealTypes || subscriptionData?.subscriptionHeader?.mealTypes || []
+      const deliveryDays = newActionData.deliveryDays || subscriptionData?.subscriptionHeader?.deliveryDays || []
+
+      console.log('📊 Parameters for API call:', {
+        customerId,
+        planId,
+        duration,
+        mealTypes,
+        deliveryDays,
+        subscriptionHeader: subscriptionData?.subscriptionHeader,
+        availableFields: Object.keys(subscriptionData?.subscriptionHeader || {})
+      })
+
+      console.log('🔍 Detailed delivery days analysis:')
+      console.log('🔍 newActionData.deliveryDays:', newActionData.deliveryDays)
+      console.log('🔍 subscriptionData?.subscriptionHeader?.deliveryDays:', subscriptionData?.subscriptionHeader?.deliveryDays)
+      console.log('🔍 Final deliveryDays parameter:', deliveryDays)
+      console.log('🔍 deliveryDays type and length:', typeof deliveryDays, Array.isArray(deliveryDays) ? deliveryDays.length : 'not array')
+
+      // Call API with validation
+      if (customerId && planId && duration) {
+        getPlanPrice(customerId, planId, duration, mealTypes, deliveryDays)
+      } else {
+        console.log('⚠️ triggerPlanPriceUpdate: Missing required parameters')
+      }
+    }, 500) // Wait 500ms after user stops making changes
   }
 
   // Change Status Dialog States
@@ -2844,35 +2960,60 @@ const ManageSubscriptions = () => {
     const subscriptionDetails = subscriptionData?.subscriptionDetails || []
     console.log('🔍 Subscription details count for delivery days:', subscriptionDetails.length)
 
+    // Debug: Log the first few subscription details to see the structure
+    console.log('🔍 First subscription detail structure:', subscriptionDetails[0])
+    console.log('🔍 All subscription details keys:', subscriptionDetails.length > 0 ? Object.keys(subscriptionDetails[0]) : 'No details')
+
     // Try to get delivery day IDs first, then fall back to day names
     let uniqueDeliveryDayIds = [...new Set(
       subscriptionDetails
-        .filter(detail => detail.deliveryDayID || detail.deliveryDayId)
-        .map(detail => detail.deliveryDayID || detail.deliveryDayId)
+        .filter(detail => detail.dayID || detail.deliveryDayID || detail.deliveryDayId)
+        .map(detail => detail.dayID || detail.deliveryDayID || detail.deliveryDayId)
     )]
+
+    console.log('📅 Extracted delivery day IDs from subscription details (dayID field):', uniqueDeliveryDayIds)
 
     // If no deliveryDayID found, try to get day names and convert to IDs
     if (uniqueDeliveryDayIds.length === 0) {
+      console.log('🔍 No dayID found in subscription details, trying day names...')
       const uniqueDayNames = [...new Set(
         subscriptionDetails
           .filter(detail => detail.deliveryDay || detail.dayName)
           .map(detail => detail.deliveryDay || detail.dayName)
       )]
+      console.log('🔍 Day names found in subscription details:', uniqueDayNames)
 
       console.log('📅 Found delivery day names:', uniqueDayNames)
 
       // Convert day names to IDs using available delivery days
       if (availableDeliveryDaysParam && availableDeliveryDaysParam.length > 0) {
+        console.log('🔍 Available delivery days for conversion:', availableDeliveryDaysParam.map(dd => ({
+          id: dd.id,
+          day_id: dd.day_id,
+          name: dd.name,
+          day_name: dd.day_name,
+          dayName: dd.dayName
+        })))
+
         uniqueDeliveryDayIds = uniqueDayNames
           .map(dayName => {
-            const deliveryDay = availableDeliveryDaysParam.find(dd =>
-              dd.name?.toLowerCase() === dayName?.toLowerCase() ||
-              dd.dayName?.toLowerCase() === dayName?.toLowerCase()
-            )
-            console.log(`🔍 Converting "${dayName}" to ID:`, deliveryDay?.id)
-            return deliveryDay?.id
+            console.log(`🔍 Looking for day name: "${dayName}"`)
+            const deliveryDay = availableDeliveryDaysParam.find(dd => {
+              const nameMatch = dd.name?.toLowerCase() === dayName?.toLowerCase()
+              const dayNameMatch = dd.day_name?.toLowerCase() === dayName?.toLowerCase()
+              const dayNameAltMatch = dd.dayName?.toLowerCase() === dayName?.toLowerCase()
+
+              console.log(`  - Checking against: name="${dd.name}", day_name="${dd.day_name}", dayName="${dd.dayName}"`)
+              console.log(`  - Matches: name=${nameMatch}, day_name=${dayNameMatch}, dayName=${dayNameAltMatch}`)
+
+              return nameMatch || dayNameMatch || dayNameAltMatch
+            })
+
+            const resultId = deliveryDay?.id || deliveryDay?.day_id
+            console.log(`🔍 Converting "${dayName}" to ID:`, resultId, 'from delivery day:', deliveryDay)
+            return resultId
           })
-          .filter(id => id !== undefined)
+          .filter(id => id !== undefined && id !== null)
 
         console.log('📅 Converted delivery day names to IDs:', uniqueDeliveryDayIds)
       } else {
@@ -2909,10 +3050,12 @@ const ManageSubscriptions = () => {
 
     // Fallback: extract from subscription details
     const subscriptionDetails = subscriptionData?.subscriptionDetails || []
+    console.log('🔍 Subscription details for delivery day extraction:', subscriptionDetails)
+
     const uniqueDeliveryDays = [...new Set(
       subscriptionDetails
-        .filter(detail => detail.deliveryDay)
-        .map(detail => detail.deliveryDay)
+        .filter(detail => detail.dayID || detail.dayId || detail.day_id || detail.deliveryDay)
+        .map(detail => detail.dayID || detail.dayId || detail.day_id || detail.deliveryDay)
     )]
 
     console.log('📅 Extracted delivery days from subscription details:', uniqueDeliveryDays)
@@ -3329,38 +3472,168 @@ const ManageSubscriptions = () => {
 
       // Handle Renew action
       if (selectedAction?.type === 'renew') {
-        if (!formData.startDate || !formData.duration) {
+        if (!actionData.startDate || !actionData.duration) {
           showError('Please fill in all required fields')
           return
         }
 
-        console.log('🔄 Processing renew action with data:', formData)
+        if (!actionData.deliveryDays || actionData.deliveryDays.length === 0) {
+          showError('Please select at least one delivery day')
+          return
+        }
 
-        // Prepare renew data based on current subscription
+        if (!actionData.mealTypes || actionData.mealTypes.length === 0) {
+          showError('Please select at least one meal type')
+          return
+        }
+
+        console.log('🔄 Processing renew action with data:', actionData)
+        console.log('🔍 Available delivery days:', availableDeliveryDays)
+        console.log('🔍 Selected delivery day IDs:', actionData.deliveryDays)
+
+        // Transform meal types to the required format for the API
+        const mealTypesArray = actionData.mealTypes.map(mealTypeId => {
+          const mealType = availableMealTypes.find(mt => mt.id === mealTypeId)
+          return {
+            mealTypeCategoryID: mealType?.categoryId || mealType?.mealTypeCategoryID || 1,
+            mealTypeCategoryName: mealType?.categoryName || mealType?.mealTypeCategoryName || "Meal",
+            mealTypeID: mealType?.id || mealType?.mealTypeID || mealTypeId,
+            mealTypeName: mealType?.name || mealType?.mealTypeName || "BREAKFAST"
+          }
+        })
+
+        // Transform selected delivery days to the required format - ONLY include valid days
+        const deliveryDaysArray = actionData.deliveryDays
+          .filter(dayId => {
+            const deliveryDay = availableDeliveryDays.find(dd => (dd.day_id || dd.id) === dayId)
+            if (!deliveryDay) {
+              console.warn('⚠️ Invalid delivery day ID found:', dayId, 'Available IDs:', availableDeliveryDays.map(dd => dd.day_id || dd.id))
+              return false
+            }
+            return true
+          })
+          .map(dayId => {
+            const deliveryDay = availableDeliveryDays.find(dd => (dd.day_id || dd.id) === dayId)
+            return {
+              day_id: dayId,
+              day_name: deliveryDay.day_name || deliveryDay.name,
+              show: true
+            }
+          })
+
+        console.log('🔍 Final delivery days array:', deliveryDaysArray)
+
+        // Validate that we have valid delivery days after filtering
+        if (deliveryDaysArray.length === 0) {
+          showError('No valid delivery days selected. Please select from the available delivery days.')
+          return
+        }
+
+        // Prepare invoice object based on "With Out Invoice" checkbox
+        let invoiceObject = null
+
+        if (!actionData.withoutInvoice) {
+          // Prepare uploadRequest from uploaded files
+          let uploadRequest = null
+
+          if (actionData.uploadedFiles && actionData.uploadedFiles.length > 0) {
+            const file = actionData.uploadedFiles[0] // Take the first file
+            const fileName = file.name
+            const extension = fileName.split('.').pop() || ''
+
+            // Convert file to base64
+            const reader = new FileReader()
+            const fileDataPromise = new Promise((resolve) => {
+              reader.onload = () => {
+                const base64Data = reader.result.split(',')[1] // Remove data:type;base64, prefix
+                resolve(base64Data)
+              }
+              reader.readAsDataURL(file)
+            })
+
+            const fileData = await fileDataPromise
+
+            uploadRequest = {
+              fileName: fileName,
+              extension: extension,
+              uploadType: 1, // Assuming 1 is for invoice files
+              data: fileData
+            }
+          } else {
+            // Default uploadRequest when no file is uploaded
+            uploadRequest = {
+              fileName: "",
+              extension: "",
+              uploadType: 1,
+              data: null
+            }
+          }
+
+          // Determine the correct branch ID based on subscription type
+          let branchId = 0
+          const subscriptionType = actionData.subscriptionType !== undefined ?
+            parseInt(actionData.subscriptionType) :
+            parseInt(subscriptionData?.subscriptionHeader?.subscriptionType) || 0
+
+          console.log('🔍 DEBUG - actionData:', actionData)
+          console.log('🔍 DEBUG - subscriptionData.subscriptionHeader:', subscriptionData?.subscriptionHeader)
+          console.log('🔍 DEBUG - subscriptionData.subscriptionHeader.branch:', subscriptionData?.subscriptionHeader?.branch)
+          console.log('🔍 DEBUG - actionData.branchId:', actionData.branchId)
+
+          if (subscriptionType === 2) {
+            // Branch subscription type - use selected branch from form
+            branchId = parseInt(actionData.branchId) || 0
+            console.log('🏢 Branch type (2) - using actionData.branchId:', branchId)
+          } else {
+            // Web (0) or Mobile (1) - use branch from subscription header branch object
+            branchId = parseInt(subscriptionData?.subscriptionHeader?.branch?.branchID) || 1
+            console.log('🏢 Web/Mobile type - using header branch.branchID:', branchId)
+          }
+
+          console.log('🏢 Branch logic - subscriptionType:', subscriptionType, 'selected branchId:', actionData.branchId, 'header branchId:', subscriptionData?.subscriptionHeader?.branchId, 'final branchId:', branchId)
+
+          // Create invoice object when "With Out Invoice" is NOT checked
+          invoiceObject = {
+            invoiceID: 0,
+            customerId: parseInt(subscriptionData?.subscriptionHeader?.customerId) || 0,
+            total: parseFloat(actionData.total) || 0,
+            discount: parseFloat(actionData.discount) || 0,
+            net: parseFloat(actionData.net) || 0,
+            tax: parseFloat(actionData.taxAmount) || 0,
+            subscriptionType: subscriptionType,
+            subscripBranch: branchId,
+            notes: actionData.notes || "string",
+            manualDiscount: parseFloat(actionData.manualDiscount) || 0,
+            url: "string",
+            bageValue: parseFloat(actionData.bagValue) || 0,
+            paymentDiscounts: null,
+            paymentMethods: actionData.paymentMethod ? [{
+              id: 0,
+              paymentsDetailsId: 0,
+              methodId: parseInt(actionData.paymentMethod) || 0,
+              amount: parseFloat(actionData.total) || 0,
+              refrenceId: actionData.referenceId || ""
+            }] : [],
+            uploadRequest: uploadRequest
+          }
+        }
+
+        // Prepare renew data according to the API specification
         const renewData = {
-          customerId: subscriptionData?.subscriptionHeader?.customerId,
-          customerPhone: subscriptionData?.subscriptionHeader?.phoneNumber,
-          planId: subscriptionData?.subscriptionHeader?.planId,
-          startDate: formData.startDate,
-          duration: formData.duration,
-          deliveryDays: formData.deliveryDays || subscriptionData?.subscriptionHeader?.deliveryDays || [],
-          mealTypes: formData.mealTypes || subscriptionData?.subscriptionHeader?.mealTypes || [],
-          subscriptionType: formData.subscriptionType !== undefined ? formData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0),
-          branchId: formData.branchId || subscriptionData?.subscriptionHeader?.branchId || null,
-          oldSid: subscriptionId,
-          notes: formData.notes || '',
-          discount: formData.discount || '',
-          manualDiscount: formData.manualDiscount || 0,
-          bagValue: formData.bagValue || 0,
-          withoutInvoice: formData.withoutInvoice || false,
-          uploadedFiles: formData.uploadedFiles || []
+          sid: parseInt(subscriptionId) || 0,
+          planId: parseInt(subscriptionData?.subscriptionHeader?.planId || subscriptionData?.subscriptionHeader?.planID) || 0,
+          startDate: actionData.startDate,
+          mealsType: mealTypesArray,
+          deliveryDays: deliveryDaysArray,
+          duration: parseInt(actionData.duration) || 0,
+          invoice: invoiceObject
         }
 
         console.log('📤 Sending renew request:', renewData)
 
         try {
-          // Call the create subscription API for renewal
-          const response = await fetch('/api/v1/CreateSubscriptions/CreateSubscriptions', {
+          // Call the RenewPlan API endpoint
+          const response = await fetch('http://eg.localhost:7167/api/v1/ActionsManager/subscription/RenewPlan', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -3378,7 +3651,7 @@ const ManageSubscriptions = () => {
           success('Subscription renewed successfully!')
 
           // Refresh subscription data
-          console.log('🔄 Refreshing subscription data by simulating SID search...')
+          console.log('🔄 Refreshing subscription data...')
           await handleSearch(subscriptionId.toString(), 'sid')
         } catch (apiError) {
           console.error('❌ API Error during renew:', apiError)
@@ -3398,10 +3671,10 @@ const ManageSubscriptions = () => {
         // Prepare request body according to the API specification
         const requestBody = {
           mealTypes: formData.selectedMealTypes.map(mealTypeId => ({
-            mealTypeCategoryID: "", // Will be filled from meal type data
-            mealTypeCategoryName: "", // Will be filled from meal type data
+            mealTypeCategoryID: 1, // Will be filled from meal type data
+            mealTypeCategoryName: "Meal", // Will be filled from meal type data
             mealTypeID: mealTypeId,
-            mealTypeName: "" // Will be filled from meal type data
+            mealTypeName: "BREAKFAST" // Will be filled from meal type data
           })),
           notes: formData.notes || "Meal types changed via subscription management"
         }
@@ -3419,10 +3692,10 @@ const ManageSubscriptions = () => {
             })
 
             return {
-              mealTypeCategoryID: mealTypeDetails?.categoryId || "",
-              mealTypeCategoryName: mealTypeDetails?.categoryName || "",
+              mealTypeCategoryID: mealTypeDetails?.categoryId || 1,
+              mealTypeCategoryName: mealTypeDetails?.categoryName || "Meal",
               mealTypeID: mealTypeId,
-              mealTypeName: mealTypeDetails?.name || ""
+              mealTypeName: mealTypeDetails?.name || "BREAKFAST"
             }
           })
         }
@@ -3859,7 +4132,7 @@ const ManageSubscriptions = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 dark:bg-gray-900">
+    <div className="min-h-screen bg-white dark:bg-gray-900">
       <div className="w-full mx-auto px-2 sm:px-4 lg:px-6 py-6 sm:py-8 lg:py-12">
         {/* Clean Header */}
         <div className="text-center mb-8 sm:mb-12 lg:mb-16">
@@ -4754,7 +5027,7 @@ const ManageSubscriptions = () => {
                 {selectedView === 'details' && (
                   <div className="space-y-3 sm:space-y-4 lg:space-y-6">
                     {/* Delivery Status Overview */}
-                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                    <div className="bg-white dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
                       <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Delivery Status Overview</h3>
 
                       {/* Overall Summary - Counts by Delivery Date Status */}
@@ -4888,7 +5161,7 @@ const ManageSubscriptions = () => {
                     {filteredGroupedMeals.length > 0 ? (
                       <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
                         <table className="w-full" style={{ tableLayout: 'fixed' }}>
-                          <thead className="bg-gray-50 dark:bg-gray-800/50">
+                          <thead className="bg-white dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
                             <tr className="border-b border-gray-200 dark:border-gray-700">
                               <th className="text-left py-3 px-2 font-semibold text-gray-700 dark:text-gray-300 text-xs w-8 relative group">
                                 <input
@@ -5004,7 +5277,7 @@ const ManageSubscriptions = () => {
                                   key={rowId}
                                   className={`
                                     transition-all duration-200 ease-in-out
-                                    ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/50 dark:bg-gray-800/50'}
+                                    ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-white dark:bg-gray-800/50'}
                                     hover:bg-gray-100/70 dark:hover:bg-gray-700/50
                                     ${selectedRows.includes(firstMeal?.dayID || firstMeal?.id) ? 'bg-blue-50/80 dark:bg-blue-900/20 ring-1 ring-blue-200 dark:ring-blue-800' : ''}
                                   `}
@@ -6225,7 +6498,9 @@ const ManageSubscriptions = () => {
                                   type="button"
                                   onClick={() => {
                                     const allDayIds = availableDeliveryDays.map(day => day.day_id || day.id)
-                                    setActionData(prev => ({ ...prev, deliveryDays: allDayIds }))
+                                    const newActionData = { ...actionData, deliveryDays: allDayIds }
+                                    setActionData(newActionData)
+                                    triggerPlanPriceUpdate(newActionData)
                                   }}
                                   className="text-xs px-3 py-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-md transition-colors font-medium"
                                 >
@@ -6234,7 +6509,9 @@ const ManageSubscriptions = () => {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setActionData(prev => ({ ...prev, deliveryDays: [] }))
+                                    const newActionData = { ...actionData, deliveryDays: [] }
+                                    setActionData(newActionData)
+                                    triggerPlanPriceUpdate(newActionData)
                                   }}
                                   className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-md transition-colors font-medium"
                                 >
@@ -6263,17 +6540,15 @@ const ManageSubscriptions = () => {
                                         checked={isChecked}
                                         onChange={(e) => {
                                           const dayId = deliveryDay.day_id || deliveryDay.id
+                                          let newDeliveryDays
                                           if (e.target.checked) {
-                                            setActionData(prev => ({
-                                              ...prev,
-                                              deliveryDays: [...(prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId), dayId]
-                                            }))
+                                            newDeliveryDays = [...(actionData.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId), dayId]
                                           } else {
-                                            setActionData(prev => ({
-                                              ...prev,
-                                              deliveryDays: (prev.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId)
-                                            }))
+                                            newDeliveryDays = (actionData.deliveryDays || currentSubscriptionDayIds).filter(id => id !== dayId)
                                           }
+                                          const newActionData = { ...actionData, deliveryDays: newDeliveryDays }
+                                          setActionData(newActionData)
+                                          triggerPlanPriceUpdate(newActionData)
                                         }}
                                         className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 w-4 h-4"
                                       />
@@ -6332,7 +6607,7 @@ const ManageSubscriptions = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                   </svg>
                                   <span className="text-sm text-green-700 dark:text-green-300 font-medium">
-                                    Billing disabled - Gift Code, Payment, Pricing & Attach Files sections are hidden
+                                    Billing disabled - Payment, Pricing & Attach Files sections are hidden
                                   </span>
                                 </div>
                               </div>
@@ -6343,7 +6618,8 @@ const ManageSubscriptions = () => {
 
                       {!actionData.withoutInvoice && (
                       <>
-                      {/* Gift Code Section */}
+                      {/* Gift Code Section - Hidden */}
+                      {false && (
                       <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
                         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                           <div className="flex items-center gap-3">
@@ -6381,6 +6657,7 @@ const ManageSubscriptions = () => {
                           </div>
                         </div>
                       </div>
+                      )}
 
                       {/* Payment & Settings Section */}
                       <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
@@ -6404,16 +6681,51 @@ const ManageSubscriptions = () => {
                               </label>
                               <select
                                 value={actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)}
-                                onChange={(e) => {
+                                onChange={async (e) => {
                                   const newSubscriptionType = parseInt(e.target.value)
+
                                   setActionData(prev => ({
                                     ...prev,
                                     subscriptionType: newSubscriptionType,
                                     branchId: newSubscriptionType === 2 ? prev.branchId : null // Reset branch if not Branch type
                                   }))
 
-                                  // Reload payment methods based on new subscription type
-                                  const branchId = newSubscriptionType === 2 ? (actionData.branchId || 0) : 0
+                                  // Determine branch ID based on subscription type
+                                  let branchId = 0
+
+                                  if (newSubscriptionType === 2) {
+                                    // Branch type - use selected branch or 0
+                                    branchId = actionData.branchId || 0
+                                  } else {
+                                    // Web (0) or Mobile Application (1) - fetch branches and use first one
+                                    try {
+                                      console.log('🏢 Fetching branches for Web/Mobile subscription type...')
+                                      const response = await fetch('http://eg.localhost:7167/api/v1/ActionsManager/branches', {
+                                        method: 'GET',
+                                        headers: {
+                                          'Content-Type': 'application/json'
+                                        }
+                                      })
+
+                                      if (response.ok) {
+                                        const result = await response.json()
+                                        const branchesData = result?.data || []
+                                        console.log('🏢 Fetched branches:', branchesData)
+
+                                        if (branchesData.length > 0) {
+                                          branchId = branchesData[0].branchID
+                                          console.log('🏢 Using first branch ID:', branchId, branchesData[0].branchName)
+                                        }
+                                      } else {
+                                        console.error('❌ Failed to fetch branches:', response.status)
+                                      }
+                                    } catch (error) {
+                                      console.error('❌ Error fetching branches:', error)
+                                    }
+                                  }
+
+                                  // Reload payment methods with determined branch ID
+                                  console.log('💳 Loading payment methods for subscriptionType:', newSubscriptionType, 'branchId:', branchId)
                                   loadPaymentMethods(newSubscriptionType, branchId)
                                 }}
                                 className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
@@ -6503,7 +6815,7 @@ const ManageSubscriptions = () => {
                       {!actionData.withoutInvoice && (
                       <>
                       {/* Pricing Section */}
-                      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 space-y-4">
+                      <div className="bg-white dark:bg-gray-700/50 rounded-lg p-4 space-y-4 border border-gray-200 dark:border-gray-600">
                         <div className="flex items-center justify-between">
                           <h4 className="font-medium text-gray-900 dark:text-white">Pricing & Discounts</h4>
                           {loadingPlanPrice && (
@@ -6525,16 +6837,22 @@ const ManageSubscriptions = () => {
                             <input
                               type="number"
                               step="0.01"
-                              value={actionData.total !== undefined ? actionData.total : (subscriptionData?.subscriptionHeader?.totalPrice || '')}
+                              value={(() => {
+                                // Use actionData.total if set, otherwise use API's planAmount
+                                if (actionData.total !== undefined && actionData.total !== '') {
+                                  return actionData.total
+                                }
+                                return planPriceData.planAmount || ''
+                              })()}
                               onChange={(e) => {
                                 const value = e.target.value
-                                console.log('💰 Total input changed:', value)
+                                console.log('💰 Total input changed by user:', value)
                                 // Allow empty string, zero, and valid numbers
                                 if (value === '') {
-                                  setActionData(prev => ({ ...prev, total: '' }))
+                                  setActionData(prev => ({ ...prev, total: '', _totalAutoUpdated: false }))
                                 } else {
                                   const numValue = parseFloat(value)
-                                  setActionData(prev => ({ ...prev, total: isNaN(numValue) ? '' : numValue }))
+                                  setActionData(prev => ({ ...prev, total: isNaN(numValue) ? '' : numValue, _totalAutoUpdated: false }))
                                 }
                               }}
                               className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -6548,15 +6866,22 @@ const ManageSubscriptions = () => {
                             <input
                               type="number"
                               step="0.01"
-                              value={actionData.taxAmount !== undefined ? actionData.taxAmount : (planPriceData.taxAmount || '')}
+                              value={(() => {
+                                // Use actionData value if user has set it, otherwise use planPriceData
+                                if (actionData.taxAmount !== undefined && actionData.taxAmount !== '') {
+                                  return actionData.taxAmount
+                                }
+                                return planPriceData.taxAmount || ''
+                              })()}
                               onChange={(e) => {
                                 const value = e.target.value
+                                console.log('💰 Tax Amount input changed by user:', value)
                                 // Allow empty string, zero, and valid numbers
                                 if (value === '') {
-                                  setActionData(prev => ({ ...prev, taxAmount: '' }))
+                                  setActionData(prev => ({ ...prev, taxAmount: '', _taxAmountAutoUpdated: false }))
                                 } else {
                                   const numValue = parseFloat(value)
-                                  setActionData(prev => ({ ...prev, taxAmount: isNaN(numValue) ? '' : numValue }))
+                                  setActionData(prev => ({ ...prev, taxAmount: isNaN(numValue) ? '' : numValue, _taxAmountAutoUpdated: false }))
                                 }
                               }}
                               className="w-full px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -6565,7 +6890,7 @@ const ManageSubscriptions = () => {
 
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              Manual Discount
+                              Discount
                             </label>
                             <input
                               type="number"
@@ -6631,7 +6956,13 @@ const ManageSubscriptions = () => {
                                   <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Plan Amount</span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                      ${(planPriceData.planAmount || 0).toFixed(2)}
+                                      ${(() => {
+                                        // Use user's total input if available, otherwise use API planAmount
+                                        if (actionData.total !== undefined && actionData.total !== '') {
+                                          return parseFloat(actionData.total).toFixed(2)
+                                        }
+                                        return (planPriceData.planAmount || 0).toFixed(2)
+                                      })()}
                                     </span>
                                   </div>
 
@@ -6640,12 +6971,18 @@ const ManageSubscriptions = () => {
                                       Tax ({((planPriceData.taxRate || 0) * 100).toFixed(1)}%)
                                     </span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                      ${(planPriceData.taxAmount || 0).toFixed(2)}
+                                      ${(() => {
+                                        // Use user's tax amount input if available, otherwise use API taxAmount
+                                        if (actionData.taxAmount !== undefined && actionData.taxAmount !== '') {
+                                          return parseFloat(actionData.taxAmount).toFixed(2)
+                                        }
+                                        return (planPriceData.taxAmount || 0).toFixed(2)
+                                      })()}
                                     </span>
                                   </div>
 
                                   <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600">
-                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Manual Discount</span>
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Discount</span>
                                     <span className="text-sm font-semibold text-red-600 dark:text-red-400">
                                       -${(actionData.manualDiscount !== undefined && actionData.manualDiscount !== '' ? actionData.manualDiscount : 0).toFixed(2)}
                                     </span>
@@ -6673,13 +7010,19 @@ const ManageSubscriptions = () => {
                                       <span className="text-lg font-semibold text-gray-900 dark:text-white">Total Amount</span>
                                       <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                                         ${(() => {
-                                          const planAmount = planPriceData.planAmount || 0
-                                          const taxAmount = planPriceData.taxAmount || 0
+                                          // Use user's total input for planAmount if available, otherwise use API planAmount
+                                          const planAmount = (actionData.total !== undefined && actionData.total !== '')
+                                            ? parseFloat(actionData.total) || 0
+                                            : (planPriceData.planAmount || 0)
+                                          // Use user's tax amount input if available, otherwise use API taxAmount
+                                          const taxAmount = (actionData.taxAmount !== undefined && actionData.taxAmount !== '')
+                                            ? parseFloat(actionData.taxAmount) || 0
+                                            : (planPriceData.taxAmount || 0)
                                           const deliveryFees = planPriceData.deliveryFees || 0
                                           const bagValue = actionData.bagValue || 0
                                           const manualDiscount = actionData.manualDiscount || 0
                                           const calculatedTotal = planAmount + taxAmount + deliveryFees + bagValue - manualDiscount
-                                          return (actionData.total !== undefined && actionData.total !== '' ? actionData.total : calculatedTotal).toFixed(2)
+                                          return calculatedTotal.toFixed(2)
                                         })()}
                                       </span>
                                     </div>

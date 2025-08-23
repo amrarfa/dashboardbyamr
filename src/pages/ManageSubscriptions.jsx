@@ -664,6 +664,26 @@ const ManageSubscriptions = () => {
     loadBranches()
   }, [])
 
+  // Validation function for renew form
+  const isRenewFormValid = () => {
+    if (selectedAction?.type !== 'renew') return true
+
+    // Basic required fields
+    if (!actionData.startDate || !actionData.duration) return false
+    if (!actionData.deliveryDays || actionData.deliveryDays.length === 0) return false
+    if (!actionData.mealTypes || actionData.mealTypes.length === 0) return false
+
+    // Additional validation when "With Out Invoice" is NOT checked
+    if (!actionData.withoutInvoice) {
+      if (!actionData.subscriptionType && actionData.subscriptionType !== 0) return false
+      if (!actionData.paymentMethod) return false
+      if (!actionData.referenceId || actionData.referenceId.trim() === '') return false
+      if (!actionData.uploadedFiles || actionData.uploadedFiles.length === 0) return false
+    }
+
+    return true
+  }
+
   // Load meal types for renew form (step by step)
   const loadMealTypesForRenew = async () => {
     console.log('🚀 loadMealTypesForRenew function called!')
@@ -806,9 +826,10 @@ const ManageSubscriptions = () => {
         ...prev,
         mealTypes: currentMealTypes,
         deliveryDays: currentDeliveryDays,
-        duration: subscriptionData?.subscriptionHeader?.duration || '',
-        subscriptionType: subscriptionData?.subscriptionHeader?.subscriptionType || 0,
-        branchId: subscriptionData?.subscriptionHeader?.branchId || null
+        duration: '', // Start with empty duration to show "Choose duration"
+        // Keep subscriptionType and branchId empty - user must select
+        subscriptionType: prev.subscriptionType || '',
+        branchId: prev.branchId || null
       }))
 
     } catch (error) {
@@ -2930,100 +2951,65 @@ const ManageSubscriptions = () => {
   }
 
   const getCurrentSubscriptionDeliveryDaysWithAvailable = (availableDeliveryDaysParam) => {
-    // Try different possible field names for delivery days
     const subscriptionHeader = subscriptionData?.subscriptionHeader
     if (!subscriptionHeader) return []
 
-    const deliveryDays = subscriptionHeader.deliveryDays ||
-                        subscriptionHeader.DeliveryDays ||
-                        subscriptionHeader.delivery_days ||
-                        []
+    // Get delivery days from subscription header
+    const deliveryDaysData = subscriptionHeader.deliveryDays
 
-    console.log('📅 Getting current delivery days from subscription:', deliveryDays)
+    console.log('📅 Getting delivery days from subscription header:', deliveryDaysData)
+    console.log('📅 Type of delivery days data:', typeof deliveryDaysData)
     console.log('🔍 Available delivery days for conversion:', availableDeliveryDaysParam)
 
-    // If deliveryDays is an array of objects, extract IDs
-    if (Array.isArray(deliveryDays) && deliveryDays.length > 0) {
-      if (typeof deliveryDays[0] === 'object' && deliveryDays[0].id) {
-        const extractedIds = deliveryDays.map(dd => dd.id)
-        console.log('📅 Extracted IDs from delivery day objects:', extractedIds)
-        return extractedIds
-      }
-      // If it's already an array of IDs
-      if (typeof deliveryDays[0] === 'number') {
-        console.log('📅 Using existing delivery day IDs:', deliveryDays)
-        return deliveryDays
-      }
+    let dayNames = []
+
+    // Handle different formats of delivery days data
+    if (Array.isArray(deliveryDaysData)) {
+      // If it's already an array: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Saturday', 'Sunday']
+      dayNames = deliveryDaysData.map(day => day.trim()).filter(Boolean)
+      console.log('📅 Using delivery days array:', dayNames)
+    } else if (typeof deliveryDaysData === 'string' && deliveryDaysData.length > 0) {
+      // If it's a string: "Monday|Tuesday|Wednesday|Thursday|Saturday|Sunday"
+      dayNames = deliveryDaysData.split('|').map(day => day.trim()).filter(Boolean)
+      console.log('📅 Split delivery days string:', dayNames)
+    } else {
+      console.log('⚠️ No valid delivery days found in subscription header')
+      return []
     }
 
-    // Fallback: extract from subscription details
-    const subscriptionDetails = subscriptionData?.subscriptionDetails || []
-    console.log('🔍 Subscription details count for delivery days:', subscriptionDetails.length)
+    // Convert day names to actual IDs from available delivery days
+    const dayIds = dayNames
+      .map(dayName => {
+        const normalizedName = dayName?.toLowerCase()?.trim()
 
-    // Debug: Log the first few subscription details to see the structure
-    console.log('🔍 First subscription detail structure:', subscriptionDetails[0])
-    console.log('🔍 All subscription details keys:', subscriptionDetails.length > 0 ? Object.keys(subscriptionDetails[0]) : 'No details')
+        // Find the matching day in available delivery days
+        const matchingDay = availableDeliveryDaysParam.find(day => {
+          const dayNameFromAvailable = (day.day_name || day.name || '').toLowerCase().trim()
+          return dayNameFromAvailable === normalizedName
+        })
 
-    // Try to get delivery day IDs first, then fall back to day names
-    let uniqueDeliveryDayIds = [...new Set(
-      subscriptionDetails
-        .filter(detail => detail.dayID || detail.deliveryDayID || detail.deliveryDayId)
-        .map(detail => detail.dayID || detail.deliveryDayID || detail.deliveryDayId)
-    )]
+        const dayId = matchingDay ? (matchingDay.day_id || matchingDay.id) : null
 
-    console.log('📅 Extracted delivery day IDs from subscription details (dayID field):', uniqueDeliveryDayIds)
+        console.log(`🔍 Converting "${dayName}" to ID: ${dayId}`)
 
-    // If no deliveryDayID found, try to get day names and convert to IDs
-    if (uniqueDeliveryDayIds.length === 0) {
-      console.log('🔍 No dayID found in subscription details, trying day names...')
-      const uniqueDayNames = [...new Set(
-        subscriptionDetails
-          .filter(detail => detail.deliveryDay || detail.dayName)
-          .map(detail => detail.deliveryDay || detail.dayName)
-      )]
-      console.log('🔍 Day names found in subscription details:', uniqueDayNames)
+        // Special debug for Sunday
+        if (normalizedName === 'sunday') {
+          console.log(`🔍 SUNDAY CONVERSION DEBUG:`)
+          console.log(`  - Input dayName: "${dayName}"`)
+          console.log(`  - Normalized: "${normalizedName}"`)
+          console.log(`  - Matching day found:`, matchingDay)
+          console.log(`  - Mapped ID: ${dayId}`)
+        }
 
-      console.log('📅 Found delivery day names:', uniqueDayNames)
+        return dayId
+      })
+      .filter(id => id !== undefined && id !== null)
 
-      // Convert day names to IDs using available delivery days
-      if (availableDeliveryDaysParam && availableDeliveryDaysParam.length > 0) {
-        console.log('🔍 Available delivery days for conversion:', availableDeliveryDaysParam.map(dd => ({
-          id: dd.id,
-          day_id: dd.day_id,
-          name: dd.name,
-          day_name: dd.day_name,
-          dayName: dd.dayName
-        })))
-
-        uniqueDeliveryDayIds = uniqueDayNames
-          .map(dayName => {
-            console.log(`🔍 Looking for day name: "${dayName}"`)
-            const deliveryDay = availableDeliveryDaysParam.find(dd => {
-              const nameMatch = dd.name?.toLowerCase() === dayName?.toLowerCase()
-              const dayNameMatch = dd.day_name?.toLowerCase() === dayName?.toLowerCase()
-              const dayNameAltMatch = dd.dayName?.toLowerCase() === dayName?.toLowerCase()
-
-              console.log(`  - Checking against: name="${dd.name}", day_name="${dd.day_name}", dayName="${dd.dayName}"`)
-              console.log(`  - Matches: name=${nameMatch}, day_name=${dayNameMatch}, dayName=${dayNameAltMatch}`)
-
-              return nameMatch || dayNameMatch || dayNameAltMatch
-            })
-
-            const resultId = deliveryDay?.id || deliveryDay?.day_id
-            console.log(`🔍 Converting "${dayName}" to ID:`, resultId, 'from delivery day:', deliveryDay)
-            return resultId
-          })
-          .filter(id => id !== undefined && id !== null)
-
-        console.log('📅 Converted delivery day names to IDs:', uniqueDeliveryDayIds)
-      } else {
-        console.log('⚠️ No available delivery days to convert names to IDs')
-      }
-    }
-
-    console.log('📅 Final extracted delivery days from subscription details:', uniqueDeliveryDayIds)
-    return uniqueDeliveryDayIds
+    console.log('📅 Final converted delivery day IDs:', dayIds)
+    return dayIds
   }
+
+
 
   const getCurrentSubscriptionDeliveryDays = () => {
     // Try different possible field names for delivery days
@@ -3062,6 +3048,86 @@ const ManageSubscriptions = () => {
     return uniqueDeliveryDays
   }
 
+
+
+  // Get the last delivery date for display
+  const getLastDeliveryDate = () => {
+    if (!subscriptionData?.subscriptionDetails?.length) {
+      return 'No delivery dates found'
+    }
+
+    // Use the same logic as getMinimumRenewStartDate for consistency
+    const deliveryDates = subscriptionData.subscriptionDetails
+      .map((detail, index) => {
+        const dateValue = detail.deliveryDate || detail.date
+        console.log(`🔍 DEBUG: Detail ${index + 1} - Raw deliveryDate:`, detail.deliveryDate, 'Raw date:', detail.date, 'Using:', dateValue)
+        return dateValue
+      })
+      .filter(date => date && date !== 'N/A')
+      .map(date => new Date(date))
+      .filter(date => !isNaN(date.getTime()))
+
+    if (deliveryDates.length === 0) {
+      return 'No valid delivery dates found'
+    }
+
+    const maxTimestamp = Math.max(...deliveryDates.map(d => d.getTime()))
+    const maxDeliveryDate = new Date(maxTimestamp)
+    return maxDeliveryDate.toLocaleDateString()
+  }
+
+  // Calculate minimum allowed date for renew start date
+  const getMinimumRenewStartDate = () => {
+    if (!subscriptionData?.subscriptionDetails?.length) {
+      return new Date().toISOString().split('T')[0]
+    }
+
+    // Get last delivery date
+    const deliveryDates = subscriptionData.subscriptionDetails
+      .map(detail => detail.deliveryDate || detail.date)
+      .filter(date => date && date !== 'N/A')
+      .map(date => new Date(date))
+      .filter(date => !isNaN(date.getTime()))
+
+    if (deliveryDates.length === 0) {
+      return new Date().toISOString().split('T')[0]
+    }
+
+    // Find the last delivery date
+    const lastDeliveryDate = new Date(Math.max(...deliveryDates.map(d => d.getTime())))
+
+    // Get today's date
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    let minDate
+
+    if (lastDeliveryDate > today) {
+      // If last delivery date is in the future: minDate = lastDate + 2 days
+      minDate = new Date(lastDeliveryDate.getFullYear(), lastDeliveryDate.getMonth(), lastDeliveryDate.getDate() + 2)
+      console.log('🔍 Last delivery is in future, using lastDate + 2 days')
+    } else {
+      // If last delivery date is in the past: minDate = today + 2 days
+      minDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2)
+      console.log('🔍 Last delivery is in past, using today + 2 days')
+    }
+
+    const result = minDate.toISOString().split('T')[0]
+    console.log('🔍 Last delivery date:', lastDeliveryDate.toISOString().split('T')[0])
+    console.log('🔍 Today date:', today.toISOString().split('T')[0])
+    console.log('🔍 Minimum date:', result)
+
+    return result
+  }
+
+  // Get the actual start date (what will be sent to API)
+  const getActualStartDate = (selectedDate) => {
+    if (!selectedDate) return ''
+
+    // Return the selected date as-is, no need to add extra day
+    return selectedDate
+  }
+
   // Action Handlers
   const handleActionClick = (actionType, actionCategory) => {
     // Handle refund action specially
@@ -3093,7 +3159,10 @@ const ManageSubscriptions = () => {
     // Handle renew action specially - meal types will be pre-populated after they're loaded
     if (actionType === 'renew') {
       console.log('🔄 RENEW ACTION CLICKED - Meal types will be pre-populated after loading...')
-      setActionData({}) // Start with empty data, will be populated after meal types load
+      setActionData({ paymentMethod: '', subscriptionType: '' }) // Start with empty data - user must select subscription type
+
+      // Don't load payment methods automatically - user must select subscription type first
+      console.log('💳 Payment methods will be loaded after user selects subscription type')
     } else {
       setActionData({}) // Reset action data for other actions
     }
@@ -3487,6 +3556,29 @@ const ManageSubscriptions = () => {
           return
         }
 
+        // Additional validation when "With Out Invoice" is NOT checked
+        if (!actionData.withoutInvoice) {
+          if (!actionData.subscriptionType && actionData.subscriptionType !== 0) {
+            showError('Please select a subscription type')
+            return
+          }
+
+          if (!actionData.paymentMethod) {
+            showError('Please select a payment method')
+            return
+          }
+
+          if (!actionData.referenceId || actionData.referenceId.trim() === '') {
+            showError('Please enter a reference ID')
+            return
+          }
+
+          if (!actionData.uploadedFiles || actionData.uploadedFiles.length === 0) {
+            showError('Please attach a file')
+            return
+          }
+        }
+
         console.log('🔄 Processing renew action with data:', actionData)
         console.log('🔍 Available delivery days:', availableDeliveryDays)
         console.log('🔍 Selected delivery day IDs:', actionData.deliveryDays)
@@ -3622,7 +3714,7 @@ const ManageSubscriptions = () => {
         const renewData = {
           sid: parseInt(subscriptionId) || 0,
           planId: parseInt(subscriptionData?.subscriptionHeader?.planId || subscriptionData?.subscriptionHeader?.planID) || 0,
-          startDate: actionData.startDate,
+          startDate: getActualStartDate(actionData.startDate), // Add one day to the selected date
           mealsType: mealTypesArray,
           deliveryDays: deliveryDaysArray,
           duration: parseInt(actionData.duration) || 0,
@@ -6317,11 +6409,29 @@ const ManageSubscriptions = () => {
                                   <input
                                     type="date"
                                     value={actionData.startDate || ''}
-                                    onChange={(e) => setActionData(prev => ({ ...prev, startDate: e.target.value }))}
+                                    onChange={(e) => {
+                                      const selectedDate = e.target.value
+                                      console.log('📅 Date selected:', selectedDate)
+                                      console.log('📅 Current minimum date:', getMinimumRenewStartDate())
+                                      setActionData(prev => ({ ...prev, startDate: selectedDate }))
+                                    }}
                                     className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
                                     placeholder="dd/mm/yyyy"
-                                    min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+                                    min={getMinimumRenewStartDate()}
                                   />
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {actionData.startDate ? (
+                                      <>Renewal will start on: <span className="font-medium">{getActualStartDate(actionData.startDate)}</span></>
+                                    ) : (
+                                      <>
+                                        Last delivery date: <span className="font-medium">{getLastDeliveryDate()}</span>
+                                        <br />
+                                        Minimum date: <span className="font-medium">{new Date(getMinimumRenewStartDate()).toLocaleDateString()}</span>
+                                        <br />
+                                        <span className="text-xs text-gray-400">Cannot renew on current delivery days</span>
+                                      </>
+                                    )}
+                                  </p>
                                 </div>
 
                                 {/* Duration Input */}
@@ -6329,7 +6439,7 @@ const ManageSubscriptions = () => {
                                   <div className="relative">
                                     {(actionData.durationMode || 'plan') === 'plan' ? (
                                       <select
-                                        value={actionData.duration || subscriptionData?.subscriptionHeader?.duration || ''}
+                                        value={actionData.duration || ''}
                                         onChange={(e) => {
                                           console.log('🔄 Duration dropdown changed:', e.target.value)
                                           const newDuration = parseInt(e.target.value)
@@ -6673,140 +6783,147 @@ const ManageSubscriptions = () => {
                         </div>
 
                         <div className="p-4">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {/* Subscription From */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                                Subscription From
-                              </label>
-                              <select
-                                value={actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)}
-                                onChange={async (e) => {
-                                  const newSubscriptionType = parseInt(e.target.value)
-
-                                  setActionData(prev => ({
-                                    ...prev,
-                                    subscriptionType: newSubscriptionType,
-                                    branchId: newSubscriptionType === 2 ? prev.branchId : null // Reset branch if not Branch type
-                                  }))
-
-                                  // Determine branch ID based on subscription type
-                                  let branchId = 0
-
-                                  if (newSubscriptionType === 2) {
-                                    // Branch type - use selected branch or 0
-                                    branchId = actionData.branchId || 0
-                                  } else {
-                                    // Web (0) or Mobile Application (1) - fetch branches and use first one
-                                    try {
-                                      console.log('🏢 Fetching branches for Web/Mobile subscription type...')
-                                      const response = await fetch('http://eg.localhost:7167/api/v1/ActionsManager/branches', {
-                                        method: 'GET',
-                                        headers: {
-                                          'Content-Type': 'application/json'
-                                        }
-                                      })
-
-                                      if (response.ok) {
-                                        const result = await response.json()
-                                        const branchesData = result?.data || []
-                                        console.log('🏢 Fetched branches:', branchesData)
-
-                                        if (branchesData.length > 0) {
-                                          branchId = branchesData[0].branchID
-                                          console.log('🏢 Using first branch ID:', branchId, branchesData[0].branchName)
-                                        }
-                                      } else {
-                                        console.error('❌ Failed to fetch branches:', response.status)
-                                      }
-                                    } catch (error) {
-                                      console.error('❌ Error fetching branches:', error)
-                                    }
-                                  }
-
-                                  // Reload payment methods with determined branch ID
-                                  console.log('💳 Loading payment methods for subscriptionType:', newSubscriptionType, 'branchId:', branchId)
-                                  loadPaymentMethods(newSubscriptionType, branchId)
-                                }}
-                                className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                              >
-                                <option value={0}>Web</option>
-                                <option value={1}>Mobile Application</option>
-                                <option value={2}>Branch</option>
-                              </select>
-                            </div>
-
-                            {/* Payment Method */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                                Payment Method {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
-                              </label>
-                              {loadingRenewData ? (
-                                <div className="flex items-center justify-center py-8">
-                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                                </div>
-                              ) : (
+                          <div className="space-y-4">
+                            {/* Row 1: Subscription From and Branch (if visible) */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Subscription From */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                  Subscription From
+                                </label>
                                 <select
-                                  value={actionData.paymentMethod !== undefined ? actionData.paymentMethod : (subscriptionData?.subscriptionHeader?.paymentMethod || '')}
-                                  onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                                  value={actionData.subscriptionType !== undefined ? actionData.subscriptionType : ''}
+                                  onChange={async (e) => {
+                                    const newSubscriptionType = parseInt(e.target.value)
+
+                                    setActionData(prev => ({
+                                      ...prev,
+                                      subscriptionType: newSubscriptionType,
+                                      branchId: newSubscriptionType === 2 ? prev.branchId : null // Reset branch if not Branch type
+                                    }))
+
+                                    // Determine branch ID based on subscription type
+                                    let branchId = 0
+
+                                    if (newSubscriptionType === 2) {
+                                      // Branch type - use selected branch or 0
+                                      branchId = actionData.branchId || 0
+                                    } else {
+                                      // Web (0) or Mobile Application (1) - fetch branches and use first one
+                                      try {
+                                        console.log('🏢 Fetching branches for Web/Mobile subscription type...')
+                                        const response = await fetch('http://eg.localhost:7167/api/v1/ActionsManager/branches', {
+                                          method: 'GET',
+                                          headers: {
+                                            'Content-Type': 'application/json'
+                                          }
+                                        })
+
+                                        if (response.ok) {
+                                          const result = await response.json()
+                                          const branchesData = result?.data || []
+                                          console.log('🏢 Fetched branches:', branchesData)
+
+                                          if (branchesData.length > 0) {
+                                            branchId = branchesData[0].branchID
+                                            console.log('🏢 Using first branch ID:', branchId, branchesData[0].branchName)
+                                          }
+                                        } else {
+                                          console.error('❌ Failed to fetch branches:', response.status)
+                                        }
+                                      } catch (error) {
+                                        console.error('❌ Error fetching branches:', error)
+                                      }
+                                    }
+
+                                    // Reload payment methods with determined branch ID
+                                    console.log('💳 Loading payment methods for subscriptionType:', newSubscriptionType, 'branchId:', branchId)
+                                    loadPaymentMethods(newSubscriptionType, branchId)
+                                  }}
                                   className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
                                 >
-                                  <option value="">Select payment method...</option>
-                                  {availablePaymentTypes.map((paymentType) => (
-                                    <option key={paymentType.paymentID || paymentType.id} value={paymentType.paymentID || paymentType.id}>
-                                      {paymentType.paymentName || paymentType.name}
-                                    </option>
-                                  ))}
+                                  <option value="">Select subscription type...</option>
+                                  <option value={0}>Web</option>
+                                  <option value={1}>Mobile Application</option>
+                                  <option value={2}>Branch</option>
                                 </select>
+                              </div>
+
+                              {/* Branch - Only show when Branch is selected */}
+                              {(actionData.subscriptionType === 2 || (actionData.subscriptionType === undefined && subscriptionData?.subscriptionHeader?.subscriptionType === 2)) && (
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                    Branch *
+                                  </label>
+                                  <select
+                                    value={actionData.branchId !== undefined ? actionData.branchId : (subscriptionData?.subscriptionHeader?.branchId || '')}
+                                    onChange={(e) => {
+                                      const newBranchId = parseInt(e.target.value) || null
+                                      setActionData(prev => ({
+                                        ...prev,
+                                        branchId: newBranchId,
+                                        branchName: branches.find(b => b.branchID === newBranchId)?.branchName || ''
+                                      }))
+
+                                      // Reload payment methods with new branch
+                                      const subscriptionType = actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)
+                                      loadPaymentMethods(subscriptionType, newBranchId || 0)
+                                    }}
+                                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                  >
+                                    <option value="">Choose a branch...</option>
+                                    {branches.map((branch) => (
+                                      <option key={branch.branchID} value={branch.branchID}>
+                                        {branch.branchName}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
                               )}
                             </div>
 
-                            {/* Reference ID */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                                Reference ID
-                              </label>
-                              <input
-                                type="text"
-                                value={actionData.referenceId || ''}
-                                onChange={(e) => setActionData(prev => ({ ...prev, referenceId: e.target.value }))}
-                                placeholder="Enter reference ID..."
-                                className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 shadow-sm"
-                              />
+                            {/* Row 2: Payment Method and Reference ID */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Payment Method */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                  Payment Method {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                                </label>
+                                {loadingRenewData ? (
+                                  <div className="flex items-center justify-center py-8">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                  </div>
+                                ) : (
+                                  <select
+                                    value={actionData.paymentMethod || ''}
+                                    onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                  >
+                                    <option value="">Select payment method...</option>
+                                    {availablePaymentTypes.map((paymentType) => (
+                                      <option key={paymentType.paymentID || paymentType.id} value={paymentType.paymentID || paymentType.id}>
+                                        {paymentType.paymentName || paymentType.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+
+                              {/* Reference ID */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                  Reference ID
+                                </label>
+                                <input
+                                  type="text"
+                                  value={actionData.referenceId || ''}
+                                  onChange={(e) => setActionData(prev => ({ ...prev, referenceId: e.target.value }))}
+                                  placeholder="Enter reference ID..."
+                                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 shadow-sm"
+                                />
+                              </div>
                             </div>
                           </div>
-
-                          {/* Branch - Only show when Branch is selected */}
-                          {(actionData.subscriptionType === 2 || (actionData.subscriptionType === undefined && subscriptionData?.subscriptionHeader?.subscriptionType === 2)) && (
-                            <div className="mt-6">
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                                Branch *
-                              </label>
-                              <select
-                                value={actionData.branchId !== undefined ? actionData.branchId : (subscriptionData?.subscriptionHeader?.branchId || '')}
-                                onChange={(e) => {
-                                  const newBranchId = parseInt(e.target.value) || null
-                                  setActionData(prev => ({
-                                    ...prev,
-                                    branchId: newBranchId,
-                                    branchName: branches.find(b => b.branchID === newBranchId)?.branchName || ''
-                                  }))
-
-                                  // Reload payment methods with new branch
-                                  const subscriptionType = actionData.subscriptionType !== undefined ? actionData.subscriptionType : (subscriptionData?.subscriptionHeader?.subscriptionType || 0)
-                                  loadPaymentMethods(subscriptionType, newBranchId || 0)
-                                }}
-                                className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                              >
-                                <option value="">Choose a branch...</option>
-                                {branches.map((branch) => (
-                                  <option key={branch.branchID} value={branch.branchID}>
-                                    {branch.branchName}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
                         </div>
                       </div>
                       </>
@@ -7811,9 +7928,12 @@ const ManageSubscriptions = () => {
                   >
                     Cancel
                   </button>
+
+                  {/* Submit button - always visible but disabled until validation passes */}
                   <button
                     onClick={() => handleActionSubmit(actionData)}
                     disabled={actionLoading ||
+                      !isRenewFormValid() ||
                       (selectedAction?.type === 'extendDays' && (!actionData.days || actionData.days < 1)) ||
                       (selectedAction?.type === 'activate' && !actionData.activeDate) ||
                       (selectedAction?.type === 'hold' && !actionData.holdDate) ||
@@ -7821,7 +7941,6 @@ const ManageSubscriptions = () => {
                       (selectedAction?.type === 'unrestrict' && (!actionData.selectedDays || actionData.selectedDays.length === 0)) ||
                       (selectedAction?.type === 'changeStartDate' && !actionData.startDate) ||
                       (selectedAction?.type === 'mergeUnmerge' && selectedRows.length === 0) ||
-                      (selectedAction?.type === 'renew' && (!actionData.startDate || !actionData.duration)) ||
                       (selectedAction?.type === 'changeMealType' && (!actionData.selectedMealTypes || actionData.selectedMealTypes.length === 0))
                     }
                     className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2"

@@ -38,7 +38,8 @@ import {
   ToggleLeft,
   Trash2,
   Shuffle,
-  RefreshCw
+  RefreshCw,
+  ArrowRightLeft
 } from 'lucide-react'
 import { useToast } from '../contexts/ToastContext'
 
@@ -562,6 +563,12 @@ const ManageSubscriptions = () => {
   // Branches data for renew form
   const [branches, setBranches] = useState([])
 
+  // Migration form data states
+  const [planCategories, setPlanCategories] = useState([])
+  const [availablePlans, setAvailablePlans] = useState([])
+  const [loadingPlanCategories, setLoadingPlanCategories] = useState(false)
+  const [loadingPlans, setLoadingPlans] = useState(false)
+
   // Renew form data states
   const [availableMealTypes, setAvailableMealTypes] = useState([])
   const [availableDurations, setAvailableDurations] = useState([])
@@ -614,6 +621,71 @@ const ManageSubscriptions = () => {
     }
   }
 
+  // Load plan categories for migration
+  const loadPlanCategories = async () => {
+    setLoadingPlanCategories(true)
+    try {
+      console.log('📋 Loading plan categories...')
+      const response = await fetch('http://eg.localhost:7167/api/v1/CreateSubscriptions/GetPlanCategory', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      const categoriesData = result?.data || result || []
+      console.log('📋 Plan categories loaded:', categoriesData)
+      setPlanCategories(categoriesData)
+    } catch (error) {
+      console.error('❌ Error loading plan categories:', error)
+      showError('Failed to load plan categories')
+      setPlanCategories([])
+    } finally {
+      setLoadingPlanCategories(false)
+    }
+  }
+
+  // Load plans by category ID
+  const loadPlansByCategory = async (categoryId) => {
+    if (!categoryId) {
+      setAvailablePlans([])
+      return
+    }
+
+    setLoadingPlans(true)
+    try {
+      console.log('📋 Loading plans for category:', categoryId)
+      const response = await fetch(`http://eg.localhost:7167/api/v1/CreateSubscriptions/GetPlansByPlanCategoryID-${categoryId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      const plansData = result?.data || result || []
+      console.log('📋 Plans loaded for category:', plansData)
+      setAvailablePlans(plansData)
+    } catch (error) {
+      console.error('❌ Error loading plans:', error)
+      showError('Failed to load plans for selected category')
+      setAvailablePlans([])
+    } finally {
+      setLoadingPlans(false)
+    }
+  }
+
+
+
   // Load meal types and durations based on plan ID
   const loadPlanData = async (planId) => {
     if (!planId) {
@@ -664,9 +736,15 @@ const ManageSubscriptions = () => {
     loadBranches()
   }, [])
 
-  // Validation function for renew form
+  // Validation function for renew and migrate forms
   const isRenewFormValid = () => {
-    if (selectedAction?.type !== 'renew') return true
+    if (selectedAction?.type !== 'renew' && selectedAction?.type !== 'migrate') return true
+
+    // For migration, validate plan selection first
+    if (selectedAction?.type === 'migrate') {
+      if (!actionData.planCategoryId) return false
+      if (!actionData.planId) return false
+    }
 
     // Basic required fields
     if (!actionData.startDate || !actionData.duration) return false
@@ -3163,6 +3241,17 @@ const ManageSubscriptions = () => {
 
       // Don't load payment methods automatically - user must select subscription type first
       console.log('💳 Payment methods will be loaded after user selects subscription type')
+    } else if (actionType === 'migrate') {
+      console.log('🔄 MIGRATE ACTION CLICKED - Loading plan categories and setting up migration...')
+      setActionData({
+        paymentMethod: '',
+        subscriptionType: '',
+        planCategoryId: '',
+        planId: ''
+      }) // Start with empty data - user must select everything
+
+      // Load plan categories for migration
+      loadPlanCategories()
     } else {
       setActionData({}) // Reset action data for other actions
     }
@@ -3748,6 +3837,176 @@ const ManageSubscriptions = () => {
         } catch (apiError) {
           console.error('❌ API Error during renew:', apiError)
           throw new Error(`Failed to renew subscription: ${apiError.message}`)
+        }
+      }
+
+      // Handle Migration action
+      if (selectedAction?.type === 'migrate') {
+        if (!actionData.planCategoryId || !actionData.planId) {
+          showError('Please select both plan category and plan')
+          return
+        }
+
+        if (!actionData.startDate || !actionData.duration) {
+          showError('Please fill in all required fields')
+          return
+        }
+
+        if (!actionData.deliveryDays || actionData.deliveryDays.length === 0) {
+          showError('Please select at least one delivery day')
+          return
+        }
+
+        if (!actionData.mealTypes || actionData.mealTypes.length === 0) {
+          showError('Please select at least one meal type')
+          return
+        }
+
+        // Additional validation when "With Out Invoice" is NOT checked
+        if (!actionData.withoutInvoice) {
+          if (!actionData.subscriptionType && actionData.subscriptionType !== 0) {
+            showError('Please select a subscription type')
+            return
+          }
+          if (!actionData.paymentMethod) {
+            showError('Please select a payment method')
+            return
+          }
+          if (!actionData.referenceId || actionData.referenceId.trim() === '') {
+            showError('Please enter a reference ID')
+            return
+          }
+          if (!actionData.uploadedFiles || actionData.uploadedFiles.length === 0) {
+            showError('Please upload at least one invoice file')
+            return
+          }
+        }
+
+        console.log('🔄 Processing migration action with data:', actionData)
+
+        try {
+          // Prepare file upload data (similar to renew)
+          let uploadRequest = null
+          if (!actionData.withoutInvoice && actionData.uploadedFiles && actionData.uploadedFiles.length > 0) {
+            const formData = new FormData()
+            actionData.uploadedFiles.forEach((file, index) => {
+              formData.append(`files`, file)
+            })
+
+            uploadRequest = {
+              files: actionData.uploadedFiles.map(file => ({
+                fileName: file.name,
+                fileSize: file.size,
+                fileType: file.type
+              }))
+            }
+          }
+
+          // Prepare invoice object when "With Out Invoice" is NOT checked
+          let invoiceObject = null
+          if (!actionData.withoutInvoice) {
+            // Determine the correct branch ID based on subscription type
+            let branchId = 0
+            const subscriptionType = actionData.subscriptionType !== undefined ?
+              parseInt(actionData.subscriptionType) :
+              parseInt(subscriptionData?.subscriptionHeader?.subscriptionType) || 0
+
+            if (subscriptionType === 2) {
+              // Branch subscription type - use selected branch from form
+              branchId = parseInt(actionData.branchId) || 0
+            } else {
+              // Web (0) or Mobile (1) - use branch from subscription header branch object
+              branchId = parseInt(subscriptionData?.subscriptionHeader?.branch?.branchID) || 1
+            }
+
+            // Create invoice object
+            invoiceObject = {
+              invoiceID: 0,
+              customerId: parseInt(subscriptionData?.subscriptionHeader?.customerId) || 0,
+              total: parseFloat(actionData.total) || 0,
+              discount: parseFloat(actionData.discount) || 0,
+              net: parseFloat(actionData.net) || 0,
+              tax: parseFloat(actionData.taxAmount) || 0,
+              subscriptionType: subscriptionType,
+              subscripBranch: branchId,
+              notes: actionData.notes || "Plan migrated via subscription management",
+              manualDiscount: parseFloat(actionData.manualDiscount) || 0,
+              url: "string",
+              bageValue: parseFloat(actionData.bagValue) || 0,
+              paymentDiscounts: null,
+              paymentMethods: actionData.paymentMethod ? [{
+                id: 0,
+                paymentsDetailsId: 0,
+                methodId: parseInt(actionData.paymentMethod) || 0,
+                amount: parseFloat(actionData.total) || 0,
+                refrenceId: actionData.referenceId || ""
+              }] : [],
+              uploadRequest: uploadRequest
+            }
+          }
+
+          // Prepare migration data according to the API specification
+          const requestBody = {
+            subscriptionId: parseInt(subscriptionId),
+            planId: parseInt(actionData.planId),
+            startDate: actionData.startDate,
+            duration: parseInt(actionData.duration),
+            deliveryDays: actionData.deliveryDays.map(dayId => parseInt(dayId)),
+            mealTypes: actionData.mealTypes.map(mealTypeId => ({
+              mealTypeCategoryID: 1, // Will be enhanced with actual data
+              mealTypeCategoryName: "Meal",
+              mealTypeID: parseInt(mealTypeId),
+              mealTypeName: "BREAKFAST" // Will be enhanced with actual data
+            })),
+            withoutInvoice: actionData.withoutInvoice || false,
+            invoice: invoiceObject,
+            notes: actionData.notes || "Plan migrated via subscription management"
+          }
+
+          // Enhance meal types with actual data if available
+          if (availableMealTypes && availableMealTypes.length > 0) {
+            requestBody.mealTypes = actionData.mealTypes.map(mealTypeId => {
+              const mealType = availableMealTypes.find(mt => mt.id === parseInt(mealTypeId))
+              return {
+                mealTypeCategoryID: mealType?.categoryId || 1,
+                mealTypeCategoryName: mealType?.categoryName || "Meal",
+                mealTypeID: parseInt(mealTypeId),
+                mealTypeName: mealType?.name || "BREAKFAST"
+              }
+            })
+          }
+
+          console.log('📤 Migration request body:', JSON.stringify(requestBody, null, 2))
+          console.log('📡 API URL:', `/api/v1/ActionsManager/subscription/MigrationPlan`)
+
+          const response = await makeApiCall(`/api/v1/ActionsManager/subscription/MigrationPlan`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify(requestBody)
+          })
+
+          console.log('📡 Migration response status:', response.status)
+
+          if (!response.ok) {
+            const errorText = await response.text()
+            console.error('❌ API Error Response:', errorText)
+            throw new Error(`Failed to migrate plan: ${response.status} - ${errorText}`)
+          }
+
+          const result = await response.json()
+          console.log('✅ Migration response:', result)
+
+          success('Plan migrated successfully!')
+
+          // Refresh subscription data
+          console.log('🔄 Refreshing subscription data...')
+          await handleSearch(subscriptionId.toString(), 'sid')
+        } catch (apiError) {
+          console.error('❌ API Error during migration:', apiError)
+          throw new Error(`Failed to migrate plan: ${apiError.message}`)
         }
       }
 
@@ -4992,6 +5251,13 @@ const ManageSubscriptions = () => {
                         Extend Days
                       </button>
                       <button
+                        onClick={() => handleActionClick('migrate', 'days')}
+                        className="w-full text-left px-3 py-2 text-sm bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
+                      >
+                        <ArrowRightLeft className="h-4 w-4" />
+                        Migrate Plan
+                      </button>
+                      <button
                         onClick={() => handleActionClick('renew', 'days')}
                         className="w-full text-left px-3 py-2 text-sm bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg transition-colors duration-200 flex items-center gap-2"
                       >
@@ -5913,6 +6179,7 @@ const ManageSubscriptions = () => {
                       {selectedAction?.type === 'changeDayStatus' && 'Change Day Status'}
                       {selectedAction?.type === 'deleteDays' && 'Delete Days'}
                       {selectedAction?.type === 'renew' && 'Renew Subscription'}
+                      {selectedAction?.type === 'migrate' && 'Migrate to New Plan'}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                       {selectedAction?.category === 'status' && 'Modify subscription status'}
@@ -5921,6 +6188,7 @@ const ManageSubscriptions = () => {
                       {selectedAction?.category === 'customer' && 'Update customer information'}
                       {selectedAction?.category === 'global' && 'Global subscription changes'}
                       {selectedAction?.type === 'renew' && `Plan: ${subscriptionData?.subscriptionHeader?.planName || 'Current Plan'} • SID: ${subscriptionData?.subscriptionHeader?.subscriptionId}`}
+                      {selectedAction?.type === 'migrate' && `Current Plan: ${subscriptionData?.subscriptionHeader?.planName || 'Unknown'} → New Plan • SID: ${subscriptionData?.subscriptionHeader?.subscriptionId}`}
                     </p>
                   </div>
                   <button
@@ -6333,6 +6601,601 @@ const ManageSubscriptions = () => {
                           </div>
                         )}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Migrate to New Plan Form */}
+                  {selectedAction?.type === 'migrate' && (
+                    <div className="space-y-4">
+                      {console.log('🎯 Migration form is rendering!', { selectedAction, actionData })}
+
+                      {/* Plan Selection Section */}
+                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                              <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Plan Selection</h3>
+                          </div>
+                        </div>
+
+                        <div className="p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Plan Category */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                Plan Category *
+                              </label>
+                              {loadingPlanCategories ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                </div>
+                              ) : (
+                                <select
+                                  value={actionData.planCategoryId || ''}
+                                  onChange={(e) => {
+                                    const categoryId = e.target.value
+                                    setActionData(prev => ({
+                                      ...prev,
+                                      planCategoryId: categoryId,
+                                      planId: '' // Reset plan selection when category changes
+                                    }))
+                                    if (categoryId) {
+                                      loadPlansByCategory(categoryId)
+                                    } else {
+                                      setAvailablePlans([])
+                                    }
+                                  }}
+                                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                >
+                                  <option value="">Select plan category...</option>
+                                  {planCategories.map((category) => (
+                                    <option key={category.planCategoryID || category.id} value={category.planCategoryID || category.id}>
+                                      {category.planCategoryName || category.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+
+                            {/* Plan */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                Plan *
+                              </label>
+                              {loadingPlans ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                </div>
+                              ) : (
+                                <select
+                                  value={actionData.planId || ''}
+                                  onChange={(e) => {
+                                    const planId = e.target.value
+                                    setActionData(prev => ({ ...prev, planId }))
+                                    if (planId) {
+                                      // Load meal types and other data for the selected plan
+                                      loadPlanData(planId)
+                                    }
+                                  }}
+                                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                  disabled={!actionData.planCategoryId}
+                                >
+                                  <option value="">Select plan...</option>
+                                  {availablePlans.map((plan) => (
+                                    <option key={plan.planID || plan.id} value={plan.planID || plan.id}>
+                                      {plan.planName || plan.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              {!actionData.planCategoryId && (
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                  Please select a plan category first
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Show the rest of the form only after plan is selected */}
+                      {actionData.planId && (
+                        <>
+                          {/* Note: All sections below are identical to renew form */}
+                          {/* The form will use the same validation and logic */}
+                          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+                            <div className="flex items-center gap-3">
+                              <Info className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                              <div>
+                                <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                                  Plan Selected: {availablePlans.find(p => p.planID == actionData.planId || p.id == actionData.planId)?.planName || availablePlans.find(p => p.planID == actionData.planId || p.id == actionData.planId)?.name || 'Unknown Plan'}
+                                </p>
+                                <p className="text-xs text-blue-700 dark:text-blue-300">
+                                  Complete the form below to migrate to this new plan
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Schedule & Duration Section - Copied from Renew */}
+                          <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                                  <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3a2 2 0 012-2h4a2 2 0 012 2v4m-6 0V6a2 2 0 012-2h4a2 2 0 012 2v1m-6 0h8m-8 0H6a2 2 0 00-2 2v10a2 2 0 002 2V9a2 2 0 00-2-2h-2" />
+                                  </svg>
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Schedule & Duration</h3>
+                              </div>
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Set start date and subscription duration for the new plan</p>
+                            </div>
+
+                            <div className="p-4">
+                              <div className="space-y-4">
+                                {/* Labels Row */}
+                                <div className="grid grid-cols-2 gap-6">
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    Start Date *
+                                  </label>
+                                  <div className="flex items-center justify-between">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                      Duration * {loadingRenewData && <span className="text-xs text-gray-500">(Loading...)</span>}
+                                    </label>
+                                    {!loadingRenewData && (
+                                      <div className="flex rounded-lg bg-gray-700 p-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => setActionData(prev => ({ ...prev, durationMode: 'plan' }))}
+                                          className={`px-4 py-1 text-sm font-medium rounded-md transition-all ${
+                                            (actionData.durationMode || 'plan') === 'plan'
+                                              ? 'bg-blue-600 text-white shadow-sm'
+                                              : 'text-gray-300 hover:text-white'
+                                          }`}
+                                        >
+                                          From Plan
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setActionData(prev => ({ ...prev, durationMode: 'custom', duration: '' }))}
+                                          className={`px-4 py-1 text-sm font-medium rounded-md transition-all ${
+                                            actionData.durationMode === 'custom'
+                                              ? 'bg-blue-600 text-white shadow-sm'
+                                              : 'text-gray-300 hover:text-white'
+                                          }`}
+                                        >
+                                          Custom
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Inputs Row */}
+                                {loadingRenewData ? (
+                                  <div className="flex items-center justify-center py-8">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-2 gap-6">
+                                    {/* Start Date */}
+                                    <input
+                                      type="date"
+                                      value={actionData.startDate || ''}
+                                      min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]} // Tomorrow
+                                      onChange={(e) => setActionData(prev => ({ ...prev, startDate: e.target.value }))}
+                                      className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                    />
+
+                                    {/* Duration */}
+                                    {actionData.durationMode === 'custom' ? (
+                                      <input
+                                        type="number"
+                                        placeholder="Enter duration in days"
+                                        value={actionData.duration || ''}
+                                        onChange={(e) => setActionData(prev => ({ ...prev, duration: e.target.value }))}
+                                        className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                        min="1"
+                                      />
+                                    ) : (
+                                      <select
+                                        value={actionData.duration || ''}
+                                        onChange={(e) => setActionData(prev => ({ ...prev, duration: e.target.value }))}
+                                        className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                      >
+                                        <option value="">Select duration...</option>
+                                        {availableDurations.map((duration) => (
+                                          <option key={duration.id} value={duration.id}>
+                                            {duration.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Meal Types Section - Copied from Renew */}
+                          <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                                  <svg className="w-4 h-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
+                                  </svg>
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Meal Types</h3>
+                              </div>
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Select meal types for the new plan</p>
+                            </div>
+
+                            <div className="p-4">
+                              {loadingRenewData ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  {availableMealTypes.length > 0 ? (
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                      {availableMealTypes.map((mealType) => (
+                                        <label
+                                          key={mealType.id}
+                                          className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:border-green-300 dark:hover:border-green-500 transition-colors bg-white dark:bg-gray-700"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={actionData.mealTypes?.includes(mealType.id) || false}
+                                            onChange={(e) => {
+                                              const isChecked = e.target.checked
+                                              setActionData(prev => ({
+                                                ...prev,
+                                                mealTypes: isChecked
+                                                  ? [...(prev.mealTypes || []), mealType.id]
+                                                  : (prev.mealTypes || []).filter(id => id !== mealType.id)
+                                              }))
+                                            }}
+                                            className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded accent-green-600"
+                                          />
+                                          <span className="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            {mealType.name}
+                                          </span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-8">
+                                      <p className="text-gray-500 dark:text-gray-400">No meal types available</p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Delivery Days Section - Copied from Renew */}
+                          <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center">
+                                  <Truck className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Delivery Days</h3>
+                              </div>
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Select delivery days for the new plan</p>
+                            </div>
+
+                            <div className="p-4">
+                              {loadingRenewData ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  {availableDeliveryDays.length > 0 ? (
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                      {availableDeliveryDays.map((day) => (
+                                        <label
+                                          key={day.id}
+                                          className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:border-purple-300 dark:hover:border-purple-500 transition-colors bg-white dark:bg-gray-700"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={actionData.deliveryDays?.includes(day.id) || false}
+                                            onChange={(e) => {
+                                              const isChecked = e.target.checked
+                                              setActionData(prev => ({
+                                                ...prev,
+                                                deliveryDays: isChecked
+                                                  ? [...(prev.deliveryDays || []), day.id]
+                                                  : (prev.deliveryDays || []).filter(id => id !== day.id)
+                                              }))
+                                            }}
+                                            className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded accent-purple-600"
+                                          />
+                                          <span className="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            {day.name}
+                                          </span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-8">
+                                      <p className="text-gray-500 dark:text-gray-400">No delivery days available</p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* With Out Invoice Checkbox */}
+                          <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                            <div className="p-4">
+                              <label className="flex items-center cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={actionData.withoutInvoice || false}
+                                  onChange={(e) => {
+                                    const isChecked = e.target.checked
+                                    setActionData(prev => ({
+                                      ...prev,
+                                      withoutInvoice: isChecked,
+                                      // Clear payment-related fields when "With Out Invoice" is checked
+                                      ...(isChecked && {
+                                        subscriptionType: '',
+                                        paymentMethod: '',
+                                        referenceId: '',
+                                        uploadedFiles: [],
+                                        total: '',
+                                        discount: '',
+                                        net: '',
+                                        taxAmount: '',
+                                        manualDiscount: '',
+                                        bagValue: ''
+                                      })
+                                    }))
+                                  }}
+                                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded accent-blue-600"
+                                />
+                                <span className="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  With Out Invoice
+                                </span>
+                              </label>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-7">
+                                Check this to skip payment and invoice sections
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Subscription Type & Payment Sections - Hidden when "With Out Invoice" is checked */}
+                          {!actionData.withoutInvoice && (
+                            <>
+                              {/* Subscription Type Section */}
+                              <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                                <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center">
+                                      <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Subscription Type</h3>
+                                  </div>
+                                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Select subscription type for the new plan</p>
+                                </div>
+
+                                <div className="p-4">
+                                  <div className="space-y-3">
+                                    <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors bg-white dark:bg-gray-700">
+                                      <input
+                                        type="radio"
+                                        name="subscriptionType"
+                                        value="0"
+                                        checked={actionData.subscriptionType === '0' || actionData.subscriptionType === 0}
+                                        onChange={(e) => {
+                                          setActionData(prev => ({ ...prev, subscriptionType: e.target.value }))
+                                          if (e.target.value !== '2') {
+                                            loadPaymentMethods()
+                                          }
+                                        }}
+                                        className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 accent-indigo-600"
+                                      />
+                                      <span className="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">Web (0)</span>
+                                    </label>
+
+                                    <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors bg-white dark:bg-gray-700">
+                                      <input
+                                        type="radio"
+                                        name="subscriptionType"
+                                        value="1"
+                                        checked={actionData.subscriptionType === '1' || actionData.subscriptionType === 1}
+                                        onChange={(e) => {
+                                          setActionData(prev => ({ ...prev, subscriptionType: e.target.value }))
+                                          if (e.target.value !== '2') {
+                                            loadPaymentMethods()
+                                          }
+                                        }}
+                                        className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 accent-indigo-600"
+                                      />
+                                      <span className="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">Mobile (1)</span>
+                                    </label>
+
+                                    <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors bg-white dark:bg-gray-700">
+                                      <input
+                                        type="radio"
+                                        name="subscriptionType"
+                                        value="2"
+                                        checked={actionData.subscriptionType === '2' || actionData.subscriptionType === 2}
+                                        onChange={(e) => {
+                                          setActionData(prev => ({ ...prev, subscriptionType: e.target.value }))
+                                          if (e.target.value === '2') {
+                                            loadBranches()
+                                          } else {
+                                            loadPaymentMethods()
+                                          }
+                                        }}
+                                        className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 accent-indigo-600"
+                                      />
+                                      <span className="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">Branch (2)</span>
+                                    </label>
+                                  </div>
+
+                                  {/* Branch Selection - Only visible when Branch (2) is selected */}
+                                  {(actionData.subscriptionType === '2' || actionData.subscriptionType === 2) && (
+                                    <div className="mt-4">
+                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                        Select Branch *
+                                      </label>
+                                      <select
+                                        value={actionData.branchId || ''}
+                                        onChange={(e) => setActionData(prev => ({ ...prev, branchId: e.target.value }))}
+                                        className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                      >
+                                        <option value="">Select branch...</option>
+                                        {branches.map((branch) => (
+                                          <option key={branch.branchID} value={branch.branchID}>
+                                            {branch.branchName}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Payment Methods Section */}
+                              {(actionData.subscriptionType === '0' || actionData.subscriptionType === '1' || actionData.subscriptionType === 0 || actionData.subscriptionType === 1) && (
+                                <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                                  <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                                        <CreditCard className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                      </div>
+                                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Payment Method</h3>
+                                    </div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Select payment method and enter reference</p>
+                                  </div>
+
+                                  <div className="p-4">
+                                    <div className="space-y-4">
+                                      {/* Payment Method Selection */}
+                                      <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                          Payment Method *
+                                        </label>
+                                        {loadingPaymentMethods ? (
+                                          <div className="flex items-center justify-center py-4">
+                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
+                                          </div>
+                                        ) : (
+                                          <select
+                                            value={actionData.paymentMethod || ''}
+                                            onChange={(e) => setActionData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                                            className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-green-500 dark:focus:border-green-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                          >
+                                            <option value="">Select payment method...</option>
+                                            {availablePaymentMethods.map((method) => (
+                                              <option key={method.id} value={method.id}>
+                                                {method.name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        )}
+                                      </div>
+
+                                      {/* Reference ID */}
+                                      <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                          Reference ID *
+                                        </label>
+                                        <input
+                                          type="text"
+                                          placeholder="Enter payment reference ID"
+                                          value={actionData.referenceId || ''}
+                                          onChange={(e) => setActionData(prev => ({ ...prev, referenceId: e.target.value }))}
+                                          className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-green-500 dark:focus:border-green-400 transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* File Upload Section */}
+                              <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                                <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center">
+                                      <FileText className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Invoice Attachment</h3>
+                                  </div>
+                                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Upload invoice file (required)</p>
+                                </div>
+
+                                <div className="p-4">
+                                  <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-orange-400 dark:hover:border-orange-500 transition-colors">
+                                    <input
+                                      type="file"
+                                      multiple
+                                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                      onChange={(e) => {
+                                        const files = Array.from(e.target.files)
+                                        setActionData(prev => ({ ...prev, uploadedFiles: files }))
+                                      }}
+                                      className="hidden"
+                                      id="migration-file-upload"
+                                    />
+                                    <label htmlFor="migration-file-upload" className="cursor-pointer">
+                                      <div className="space-y-2">
+                                        <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto">
+                                          <FileText className="w-6 h-6 text-orange-600 dark:text-orange-400" />
+                                        </div>
+                                        <div>
+                                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            Click to upload files
+                                          </p>
+                                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            PDF, JPG, PNG, DOC up to 10MB each
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </label>
+                                  </div>
+
+                                  {/* Display uploaded files */}
+                                  {actionData.uploadedFiles && actionData.uploadedFiles.length > 0 && (
+                                    <div className="mt-4 space-y-2">
+                                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        Uploaded Files ({actionData.uploadedFiles.length}):
+                                      </p>
+                                      {actionData.uploadedFiles.map((file, index) => (
+                                        <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                                          <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                                            {file.name}
+                                          </span>
+                                          <button
+                                            onClick={() => {
+                                              const newFiles = actionData.uploadedFiles.filter((_, i) => i !== index)
+                                              setActionData(prev => ({ ...prev, uploadedFiles: newFiles }))
+                                            }}
+                                            className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                                          >
+                                            <X className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -7898,6 +8761,7 @@ const ManageSubscriptions = () => {
                    selectedAction?.type !== 'changeStartDate' &&
                    selectedAction?.type !== 'mergeUnmerge' &&
                    selectedAction?.type !== 'renew' &&
+                   selectedAction?.type !== 'migrate' &&
                    selectedAction?.type !== 'changeMealType' &&
                    selectedAction?.type !== 'changeDeliveryDays' &&
                    selectedAction?.type !== 'changeCustomerName' &&

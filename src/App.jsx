@@ -11,6 +11,7 @@ import Customers from './pages/Customers'
 import Subscriptions from './pages/Subscriptions'
 import CreateSubscription from './pages/CreateSubscription'
 import ManageSubscriptions from './pages/ManageSubscriptions'
+import DeliveryLog from './pages/DeliveryLog'
 import Users from './pages/Users'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
@@ -42,6 +43,7 @@ function App() {
               <Route path="subscriptions" element={<Subscriptions />} />
               <Route path="subscriptions/create" element={<CreateSubscription />} />
               <Route path="subscriptions/manage" element={<ManageSubscriptions />} />
+              <Route path="delivery-log" element={<DeliveryLog />} />
               <Route path="users" element={<Users />} />
               <Route path="reports" element={<Reports />} />
               <Route path="settings" element={<Settings />} />
